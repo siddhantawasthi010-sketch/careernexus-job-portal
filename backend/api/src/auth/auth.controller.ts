@@ -5,8 +5,18 @@ import { AuthService } from './auth.service';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('login')
-  login(@Body() body: { email: string; password: string }) {
-    return this.authService.login(body.email, body.password);
+  @Post('send-otp')
+  sendOtp(@Body() body: { email: string; role?: string }) {
+    return this.authService.sendOtp(body.email, body.role);
+  }
+
+  @Post('resend-otp')
+  resendOtp(@Body() body: { email: string; role?: string }) {
+    return this.authService.resendOtp(body.email, body.role);
+  }
+
+  @Post('verify-otp')
+  verifyOtp(@Body() body: { email: string; otp: string }) {
+    return this.authService.verifyOtp(body.email, body.otp);
   }
 }

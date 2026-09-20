@@ -14,38 +14,80 @@ const API_BASE_URL =
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('recruiter@jobportal.com');
-  const [password, setPassword] = useState('recruiter123');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
   const [role, setRole] = useState('recruiter');
-  const [loading, setLoading] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Missing fields', 'Please enter both email and password.');
+  const handleSendOtp = async (isResend = false) => {
+    if (!email.trim()) {
+      Alert.alert('Missing email', 'Please enter your email address.');
       return;
     }
 
-    setLoading(true);
+    if (isResend) {
+      setResendingOtp(true);
+    } else {
+      setSendingOtp(true);
+    }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const endpoint = isResend ? `${API_BASE_URL}/auth/resend-otp` : `${API_BASE_URL}/auth/send-otp`;
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, role }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
+        throw new Error(data.message || 'Unable to send OTP');
+      }
+
+      setOtpSent(true);
+      setResendCooldown(30);
+      Alert.alert('OTP sent', data.message || 'A one-time password has been sent to your email.');
+    } catch (error) {
+      setOtpSent(false);
+      Alert.alert('Failed', error.message || 'Could not send OTP.');
+    } finally {
+      setSendingOtp(false);
+      setResendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otp.trim()) {
+      Alert.alert('Enter OTP', 'Please enter the OTP sent to your email.');
+      return;
+    }
+
+    setVerifyingOtp(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'OTP verification failed');
       }
 
       navigation.navigate(data.user.role === 'candidate' ? 'CandidateJobs' : 'Jobs', {
         user: data.user,
       });
     } catch (error) {
-      Alert.alert('Login failed', error.message || 'Could not log in.');
+      Alert.alert('Verification failed', error.message || 'Could not verify OTP.');
     } finally {
-      setLoading(false);
+      setVerifyingOtp(false);
     }
   };
 
@@ -53,7 +95,7 @@ export default function LoginScreen({ navigation }) {
     <View style={styles.wrapper}>
       <Text style={styles.logo}>JOB PORTAL</Text>
       <Text style={styles.title}>Welcome back</Text>
-      <Text style={styles.subtitle}>Choose your role and sign in</Text>
+      <Text style={styles.subtitle}>Select your role and receive OTP</Text>
 
       <View style={styles.roleRow}>
         <TouchableOpacity
@@ -61,7 +103,8 @@ export default function LoginScreen({ navigation }) {
           onPress={() => {
             setRole('recruiter');
             setEmail('recruiter@jobportal.com');
-            setPassword('recruiter123');
+            setOtp('');
+            setOtpSent(false);
           }}
         >
           <Text style={styles.roleText}>Recruiter</Text>
@@ -72,7 +115,8 @@ export default function LoginScreen({ navigation }) {
           onPress={() => {
             setRole('candidate');
             setEmail('candidate@jobportal.com');
-            setPassword('candidate123');
+            setOtp('');
+            setOtpSent(false);
           }}
         >
           <Text style={styles.roleText}>Candidate</Text>
@@ -89,18 +133,36 @@ export default function LoginScreen({ navigation }) {
         placeholderTextColor="#8aa3c2"
       />
 
-      <TextInput
-        style={styles.input}
-        placeholder={role === 'recruiter' ? 'recruiter123' : 'candidate123'}
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        placeholderTextColor="#8aa3c2"
-      />
-
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Logging in...' : 'Login'}</Text>
+      <TouchableOpacity style={styles.button} onPress={() => handleSendOtp(false)} disabled={sendingOtp}>
+        <Text style={styles.buttonText}>{sendingOtp ? 'Sending OTP...' : 'Send OTP'}</Text>
       </TouchableOpacity>
+
+      {otpSent && (
+        <>
+          <TouchableOpacity
+            style={[styles.secondaryButton, resendCooldown > 0 && styles.secondaryButtonDisabled]}
+            onPress={() => handleSendOtp(true)}
+            disabled={resendingOtp || resendCooldown > 0}
+          >
+            <Text style={styles.buttonText}>
+              {resendingOtp ? 'Resending...' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend OTP'}
+            </Text>
+          </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter OTP"
+            value={otp}
+            onChangeText={setOtp}
+            keyboardType="number-pad"
+            maxLength={6}
+            placeholderTextColor="#8aa3c2"
+          />
+
+          <TouchableOpacity style={styles.submitButton} onPress={handleVerifyOtp} disabled={verifyingOtp}>
+            <Text style={styles.buttonText}>{verifyingOtp ? 'Verifying...' : 'Submit'}</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
 }
@@ -164,6 +226,13 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#2563eb',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  submitButton: {
+    backgroundColor: '#16a34a',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',

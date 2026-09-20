@@ -31,34 +31,107 @@ const fallbackJobs = [
 
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState('recruiter@jobportal.com');
-  const [password, setPassword] = useState('recruiter123');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
   const [role, setRole] = useState('recruiter');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [loadingOtp, setLoadingOtp] = useState(false);
+  const [loadingVerify, setLoadingVerify] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    setLoading(true);
+  const handleSendOtp = async (isResend = false) => {
+    if (!email.trim()) {
+      setError('Please enter your email address.');
+      return;
+    }
+
+    if (isResend) {
+      setResendLoading(true);
+    } else {
+      setLoadingOtp(true);
+    }
     setError('');
+    setSuccessMessage('');
 
     try {
-      const response = await fetch('http://localhost:5000/auth/login', {
+      const endpoint = isResend ? 'http://localhost:5000/auth/resend-otp' : 'http://localhost:5000/auth/send-otp';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, role }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
+        throw new Error(data.message || 'Unable to send OTP');
       }
 
-      onLogin({ ...data, role: data.user.role || role });
+      setOtpSent(true);
+      setSuccessMessage(data.message || 'OTP sent successfully.');
+      setOtp('');
+      setResendCooldown(30);
     } catch (err) {
-      setError(err.message || 'Unable to log in.');
+      setError(err.message || 'Unable to send OTP.');
+      setOtpSent(false);
     } finally {
-      setLoading(false);
+      if (isResend) {
+        setResendLoading(false);
+      } else {
+        setLoadingOtp(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const handleVerifyOtp = async (event) => {
+    event.preventDefault();
+
+    if (!otp.trim()) {
+      setError('Please enter the OTP sent to your email.');
+      return;
+    }
+
+    setLoadingVerify(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('http://localhost:5000/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'OTP verification failed');
+      }
+
+      onLogin(data);
+    } catch (err) {
+      setError(err.message || 'Unable to verify OTP.');
+    } finally {
+      setLoadingVerify(false);
     }
   };
 
@@ -67,7 +140,7 @@ function LoginScreen({ onLogin }) {
       <div className="auth-card">
         <p className="eyebrow">JOB PORTAL</p>
         <h1>Welcome back</h1>
-        <p className="muted">Choose your role and sign in</p>
+        <p className="muted">Select your role and receive an OTP</p>
 
         <div className="role-toggle">
           <button
@@ -76,7 +149,8 @@ function LoginScreen({ onLogin }) {
             onClick={() => {
               setRole('recruiter');
               setEmail('recruiter@jobportal.com');
-              setPassword('recruiter123');
+              setOtp('');
+              setOtpSent(false);
             }}
           >
             Recruiter
@@ -87,14 +161,15 @@ function LoginScreen({ onLogin }) {
             onClick={() => {
               setRole('candidate');
               setEmail('candidate@jobportal.com');
-              setPassword('candidate123');
+              setOtp('');
+              setOtpSent(false);
             }}
           >
             Candidate
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={handleVerifyOtp} className="auth-form">
           <label>
             Email
             <input
@@ -105,21 +180,38 @@ function LoginScreen({ onLogin }) {
             />
           </label>
 
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={role === 'recruiter' ? 'recruiter123' : 'candidate123'}
-            />
-          </label>
+          <button type="button" className="secondary" onClick={() => handleSendOtp(false)} disabled={loadingOtp}>
+            {loadingOtp ? 'Sending...' : 'Send OTP'}
+          </button>
+
+          {successMessage ? <p className="success">{successMessage}</p> : null}
+
+          {otpSent && (
+            <button type="button" className="secondary" onClick={() => handleSendOtp(true)} disabled={resendLoading || resendCooldown > 0}>
+              {resendLoading ? 'Resending...' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend OTP'}
+            </button>
+          )}
+
+          {otpSent ? (
+            <>
+              <label>
+                OTP
+                <input
+                  type="text"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  placeholder="Enter 6-digit OTP"
+                  maxLength={6}
+                />
+              </label>
+
+              <button type="submit" disabled={loadingVerify}>
+                {loadingVerify ? 'Verifying...' : 'Submit'}
+              </button>
+            </>
+          ) : null}
 
           {error ? <p className="error">{error}</p> : null}
-
-          <button type="submit" disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
-          </button>
         </form>
       </div>
     </div>

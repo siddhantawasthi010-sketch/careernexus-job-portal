@@ -19,18 +19,38 @@ let AuthController = class AuthController {
     constructor(authService) {
         this.authService = authService;
     }
-    login(body) {
-        return this.authService.login(body.email, body.password);
+    sendOtp(body) {
+        return this.authService.sendOtp(body.email, body.role);
+    }
+    resendOtp(body) {
+        return this.authService.resendOtp(body.email, body.role);
+    }
+    verifyOtp(body) {
+        return this.authService.verifyOtp(body.email, body.otp);
     }
 };
 exports.AuthController = AuthController;
 __decorate([
-    (0, common_1.Post)('login'),
+    (0, common_1.Post)('send-otp'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
-], AuthController.prototype, "login", null);
+], AuthController.prototype, "sendOtp", null);
+__decorate([
+    (0, common_1.Post)('resend-otp'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "resendOtp", null);
+__decorate([
+    (0, common_1.Post)('verify-otp'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "verifyOtp", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
     __metadata("design:paramtypes", [auth_service_1.AuthService])
