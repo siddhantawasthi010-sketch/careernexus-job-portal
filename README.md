@@ -50,8 +50,11 @@ npm run dev
 ```bash
 cd backend/api
 npm install
-npm run dev
+copy .env.example .env
+npm run start:dev
 ```
+
+Run [`backend/api/supabase.sql`](backend/api/supabase.sql) in the Supabase SQL Editor first, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `backend/api/.env`.
 
 ### API health check
 

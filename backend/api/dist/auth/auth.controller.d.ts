@@ -10,7 +10,7 @@ export declare class AuthController {
         email: string;
         expiresInSeconds: number;
         isNewUser: boolean;
-        role: string;
+        role: import("../database/database.service").UserRole;
     }>;
     resendOtp(body: {
         email: string;
@@ -20,18 +20,13 @@ export declare class AuthController {
         email: string;
         expiresInSeconds: number;
         isNewUser: boolean;
-        role: string;
+        role: import("../database/database.service").UserRole;
     }>;
     verifyOtp(body: {
         email: string;
         otp: string;
-    }): {
+    }): Promise<{
         accessToken: string;
-        user: {
-            id: number;
-            name: string;
-            email: string;
-            role: string;
-        };
-    };
+        user: import("../database/database.service").StoredUser;
+    }>;
 }

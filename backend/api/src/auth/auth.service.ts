@@ -1,52 +1,32 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { EmailService } from '../email/email.service';
-
-const users = {
-  'recruiter@jobportal.com': {
-    name: 'Recruiter User',
-    role: 'recruiter',
-  },
-  'candidate@jobportal.com': {
-    name: 'Candidate User',
-    role: 'candidate',
-  },
-};
+import { DatabaseService, UserRole } from '../database/database.service';
 
 @Injectable()
 export class AuthService {
   private readonly otpLifetimeMs = 5 * 60 * 1000;
   private readonly resendCooldownMs = 30 * 1000;
 
-  constructor(private readonly emailService: EmailService) {}
-
-  private otpStore = new Map<string, { otp: string; expiresAt: number; role: string; sentAt: number }>();
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly databaseService: DatabaseService,
+  ) {}
 
   private generateOtp() {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private buildUserForEmail(email: string, requestedRole?: string) {
-    const normalizedEmail = email.trim().toLowerCase();
-    const existingUser = users[normalizedEmail as keyof typeof users];
-
+  private async buildUserForEmail(email: string, requestedRole: UserRole) {
+    const existingUser = await this.databaseService.getUserByEmail(email);
     if (existingUser) {
-      return {
-        id: existingUser.role === 'recruiter' ? 1 : 2,
-        name: existingUser.name,
-        email: normalizedEmail,
-        role: existingUser.role,
-      };
+      return existingUser;
     }
 
-    const finalRole = requestedRole === 'recruiter' ? 'recruiter' : 'candidate';
-    const firstName = normalizedEmail.split('@')[0].replace(/[._-]/g, ' ');
+    const firstName = email.split('@')[0].replace(/[._-]/g, ' ');
+    const name = firstName ? firstName.charAt(0).toUpperCase() + firstName.slice(1) : 'New User';
 
-    return {
-      id: Date.now(),
-      name: firstName ? firstName.charAt(0).toUpperCase() + firstName.slice(1) : 'New User',
-      email: normalizedEmail,
-      role: finalRole,
-    };
+    return this.databaseService.upsertUser({ email, name, role: requestedRole });
   }
 
   async sendOtp(email: string, role?: string) {
@@ -56,21 +36,23 @@ export class AuthService {
       throw new UnauthorizedException('Please enter a valid email address.');
     }
 
-    const existingOtp = this.otpStore.get(normalizedEmail);
-    if (existingOtp && Date.now() - existingOtp.sentAt < this.resendCooldownMs) {
-      const remainingSeconds = Math.ceil((this.resendCooldownMs - (Date.now() - existingOtp.sentAt)) / 1000);
+    const existingOtp = await this.databaseService.getLatestOtp(normalizedEmail);
+    const sentAt = existingOtp ? new Date(existingOtp.sent_at).getTime() : 0;
+    if (existingOtp && Date.now() - sentAt < this.resendCooldownMs) {
+      const remainingSeconds = Math.ceil((this.resendCooldownMs - (Date.now() - sentAt)) / 1000);
       throw new UnauthorizedException(`Please wait ${remainingSeconds} seconds before requesting a new OTP.`);
     }
 
     const otp = this.generateOtp();
-    const expiresAt = Date.now() + this.otpLifetimeMs;
-    const selectedRole = role === 'recruiter' ? 'recruiter' : 'candidate';
+    const selectedRole: UserRole = role === 'recruiter' ? 'recruiter' : 'candidate';
+    const user = await this.databaseService.getUserByEmail(normalizedEmail);
 
-    this.otpStore.set(normalizedEmail, {
-      otp,
-      expiresAt,
+    await this.databaseService.createOtp({
+      email: normalizedEmail,
+      otp_hash: this.hashOtp(otp),
       role: selectedRole,
-      sentAt: Date.now(),
+      expires_at: new Date(Date.now() + this.otpLifetimeMs).toISOString(),
+      sent_at: new Date().toISOString(),
     });
 
     try {
@@ -83,31 +65,30 @@ export class AuthService {
       message: 'OTP sent to your email successfully.',
       email: normalizedEmail,
       expiresInSeconds: Math.floor(this.otpLifetimeMs / 1000),
-      isNewUser: !users[normalizedEmail as keyof typeof users],
+      isNewUser: !user,
       role: selectedRole,
     };
   }
 
-  verifyOtp(email: string, otp: string) {
+  async verifyOtp(email: string, otp: string) {
     const normalizedEmail = email.trim().toLowerCase();
-    const otpEntry = this.otpStore.get(normalizedEmail);
+    const otpEntry = await this.databaseService.getLatestOtp(normalizedEmail);
 
     if (!otpEntry) {
       throw new UnauthorizedException('No OTP was requested for this email. Please send OTP again.');
     }
 
-    if (Date.now() > otpEntry.expiresAt) {
-      this.otpStore.delete(normalizedEmail);
+    if (Date.now() > new Date(otpEntry.expires_at).getTime()) {
+      await this.databaseService.deleteOtps(normalizedEmail);
       throw new UnauthorizedException('OTP has expired. Please request a new one.');
     }
 
-    if (otpEntry.otp !== otp.trim()) {
+    if (this.hashOtp(otp.trim()) !== otpEntry.otp_hash) {
       throw new UnauthorizedException('Invalid OTP. Please enter the correct code.');
     }
 
-    this.otpStore.delete(normalizedEmail);
-
-    const user = this.buildUserForEmail(normalizedEmail, otpEntry.role);
+    await this.databaseService.deleteOtps(normalizedEmail);
+    const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
 
     return {
       accessToken: 'demo-jwt-token-for-job-portal',
@@ -117,5 +98,9 @@ export class AuthService {
 
   async resendOtp(email: string, role?: string) {
     return this.sendOtp(email, role);
+  }
+
+  private hashOtp(otp: string) {
+    return createHash('sha256').update(otp).digest('hex');
   }
 }

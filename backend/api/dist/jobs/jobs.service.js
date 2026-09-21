@@ -5,59 +5,27 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.JobsService = void 0;
 const common_1 = require("@nestjs/common");
+const database_service_1 = require("../database/database.service");
 let JobsService = class JobsService {
+    constructor(databaseService) {
+        this.databaseService = databaseService;
+    }
     getJobs() {
-        return [
-            {
-                id: 1,
-                title: 'Frontend Developer',
-                company: 'NovaLabs',
-                location: 'Remote',
-                type: 'Full-time',
-                salary: '$120k - $150k',
-            },
-            {
-                id: 2,
-                title: 'Backend Engineer',
-                company: 'Streamline AI',
-                location: 'Bengaluru',
-                type: 'Full-time',
-                salary: '$130k - $160k',
-            },
-            {
-                id: 3,
-                title: 'UI/UX Designer',
-                company: 'Motive Studio',
-                location: 'Hyderabad',
-                type: 'Contract',
-                salary: '$80k - $110k',
-            },
-        ];
+        return this.databaseService.getJobs();
     }
     getFeaturedJobs() {
-        return [
-            {
-                id: 101,
-                title: 'Senior React Engineer',
-                company: 'PixelForge',
-                location: 'Remote',
-                type: 'Hybrid',
-            },
-            {
-                id: 102,
-                title: 'Product Designer',
-                company: 'BluePeak',
-                location: 'Pune',
-                type: 'Full-time',
-            },
-        ];
+        return this.databaseService.getJobs(true);
     }
 };
 exports.JobsService = JobsService;
 exports.JobsService = JobsService = __decorate([
-    (0, common_1.Injectable)()
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [database_service_1.DatabaseService])
 ], JobsService);
 //# sourceMappingURL=jobs.service.js.map

@@ -1,10 +1,11 @@
 import { EmailService } from '../email/email.service';
+import { DatabaseService, UserRole } from '../database/database.service';
 export declare class AuthService {
     private readonly emailService;
+    private readonly databaseService;
     private readonly otpLifetimeMs;
     private readonly resendCooldownMs;
-    constructor(emailService: EmailService);
-    private otpStore;
+    constructor(emailService: EmailService, databaseService: DatabaseService);
     private generateOtp;
     private buildUserForEmail;
     sendOtp(email: string, role?: string): Promise<{
@@ -12,22 +13,18 @@ export declare class AuthService {
         email: string;
         expiresInSeconds: number;
         isNewUser: boolean;
-        role: string;
+        role: UserRole;
     }>;
-    verifyOtp(email: string, otp: string): {
+    verifyOtp(email: string, otp: string): Promise<{
         accessToken: string;
-        user: {
-            id: number;
-            name: string;
-            email: string;
-            role: string;
-        };
-    };
+        user: import("../database/database.service").StoredUser;
+    }>;
     resendOtp(email: string, role?: string): Promise<{
         message: string;
         email: string;
         expiresInSeconds: number;
         isNewUser: boolean;
-        role: string;
+        role: UserRole;
     }>;
+    private hashOtp;
 }
