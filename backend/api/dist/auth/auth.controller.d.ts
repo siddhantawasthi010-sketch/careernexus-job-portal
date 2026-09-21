@@ -27,6 +27,13 @@ export declare class AuthController {
         otp: string;
     }): Promise<{
         accessToken: string;
+        isNewUser: boolean;
+        user: import("../database/database.service").StoredUser;
+    }>;
+    updateProfile(body: {
+        email: string;
+        profile: Record<string, unknown>;
+    }): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;
 }

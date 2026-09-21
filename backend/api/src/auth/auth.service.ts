@@ -88,12 +88,24 @@ export class AuthService {
     }
 
     await this.databaseService.deleteOtps(normalizedEmail);
+    const existingUser = await this.databaseService.getUserByEmail(normalizedEmail);
     const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
 
     return {
       accessToken: 'demo-jwt-token-for-job-portal',
+      isNewUser: !existingUser,
       user,
     };
+  }
+
+  async updateProfile(email: string, profile: Record<string, unknown>) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !profile || typeof profile !== 'object') {
+      throw new UnauthorizedException('A valid email and profile are required.');
+    }
+
+    const user = await this.databaseService.updateUserProfile(normalizedEmail, profile);
+    return { user };
   }
 
   async resendOtp(email: string, role?: string) {

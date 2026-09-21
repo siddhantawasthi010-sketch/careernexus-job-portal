@@ -8,9 +8,12 @@ create table if not exists public.users (
   email text not null unique check (email = lower(email)),
   name text not null,
   role text not null check (role in ('candidate', 'recruiter')),
+  profile jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.users add column if not exists profile jsonb not null default '{}'::jsonb;
 
 create table if not exists public.otp_codes (
   id uuid primary key default gen_random_uuid(),

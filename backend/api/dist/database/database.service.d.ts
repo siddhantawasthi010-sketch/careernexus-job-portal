@@ -4,6 +4,7 @@ export interface StoredUser {
     name: string;
     email: string;
     role: UserRole;
+    profile: Record<string, unknown>;
 }
 export interface StoredOtp {
     otp_hash: string;
@@ -29,6 +30,7 @@ export declare class DatabaseService {
         name: string;
         role: UserRole;
     }): Promise<StoredUser>;
+    updateUserProfile(email: string, profile: Record<string, unknown>): Promise<StoredUser>;
     getLatestOtp(email: string): Promise<StoredOtp | null>;
     createOtp(otp: {
         email: string;

@@ -6,11 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Platform,
 } from 'react-native';
+import { getApiBaseUrl } from '../config/api';
 
-const API_BASE_URL =
-  Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+const API_BASE_URL = getApiBaseUrl();
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('recruiter@jobportal.com');

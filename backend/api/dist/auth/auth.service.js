@@ -82,11 +82,21 @@ let AuthService = class AuthService {
             throw new common_1.UnauthorizedException('Invalid OTP. Please enter the correct code.');
         }
         await this.databaseService.deleteOtps(normalizedEmail);
+        const existingUser = await this.databaseService.getUserByEmail(normalizedEmail);
         const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
         return {
             accessToken: 'demo-jwt-token-for-job-portal',
+            isNewUser: !existingUser,
             user,
         };
+    }
+    async updateProfile(email, profile) {
+        const normalizedEmail = email.trim().toLowerCase();
+        if (!normalizedEmail || !profile || typeof profile !== 'object') {
+            throw new common_1.UnauthorizedException('A valid email and profile are required.');
+        }
+        const user = await this.databaseService.updateUserProfile(normalizedEmail, profile);
+        return { user };
     }
     async resendOtp(email, role) {
         return this.sendOtp(email, role);

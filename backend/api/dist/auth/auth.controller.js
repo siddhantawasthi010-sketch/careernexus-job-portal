@@ -28,6 +28,9 @@ let AuthController = class AuthController {
     verifyOtp(body) {
         return this.authService.verifyOtp(body.email, body.otp);
     }
+    updateProfile(body) {
+        return this.authService.updateProfile(body.email, body.profile);
+    }
 };
 exports.AuthController = AuthController;
 __decorate([
@@ -51,6 +54,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "verifyOtp", null);
+__decorate([
+    (0, common_1.Put)('profile'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "updateProfile", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
     __metadata("design:paramtypes", [auth_service_1.AuthService])

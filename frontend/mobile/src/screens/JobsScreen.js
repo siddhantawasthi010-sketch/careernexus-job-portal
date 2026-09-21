@@ -5,11 +5,10 @@ import {
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
+import { getApiBaseUrl } from '../config/api';
 
-const API_BASE_URL =
-  Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+const API_BASE_URL = getApiBaseUrl();
 
 const fallbackJobs = [
   {

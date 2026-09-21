@@ -8,6 +8,7 @@ export interface StoredUser {
   name: string;
   email: string;
   role: UserRole;
+  profile: Record<string, unknown>;
 }
 
 export interface StoredOtp {
@@ -45,7 +46,7 @@ export class DatabaseService {
   }
 
   async getUserByEmail(email: string): Promise<StoredUser | null> {
-    const { data, error } = await this.client.from('users').select('id, name, email, role').eq('email', email).maybeSingle();
+    const { data, error } = await this.client.from('users').select('id, name, email, role, profile').eq('email', email).maybeSingle();
     if (error) {
       throw new Error(`Unable to load user: ${error.message}`);
     }
@@ -56,11 +57,27 @@ export class DatabaseService {
     const { data, error } = await this.client
       .from('users')
       .upsert(user, { onConflict: 'email' })
-      .select('id, name, email, role')
+      .select('id, name, email, role, profile')
       .single();
 
     if (error) {
       throw new Error(`Unable to save user: ${error.message}`);
+    }
+    return data as StoredUser;
+  }
+
+  async updateUserProfile(email: string, profile: Record<string, unknown>): Promise<StoredUser> {
+    const name = typeof profile.name === 'string' && profile.name.trim() ? profile.name.trim() : undefined;
+    const update = name ? { name, profile } : { profile };
+    const { data, error } = await this.client
+      .from('users')
+      .update(update)
+      .eq('email', email)
+      .select('id, name, email, role, profile')
+      .single();
+
+    if (error) {
+      throw new Error(`Unable to update user profile: ${error.message}`);
     }
     return data as StoredUser;
   }

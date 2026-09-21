@@ -17,6 +17,10 @@ export declare class AuthService {
     }>;
     verifyOtp(email: string, otp: string): Promise<{
         accessToken: string;
+        isNewUser: boolean;
+        user: import("../database/database.service").StoredUser;
+    }>;
+    updateProfile(email: string, profile: Record<string, unknown>): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;
     resendOtp(email: string, role?: string): Promise<{

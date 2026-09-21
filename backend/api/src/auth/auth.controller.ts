@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, Put } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 @Controller('auth')
@@ -18,5 +18,10 @@ export class AuthController {
   @Post('verify-otp')
   verifyOtp(@Body() body: { email: string; otp: string }) {
     return this.authService.verifyOtp(body.email, body.otp);
+  }
+
+  @Put('profile')
+  updateProfile(@Body() body: { email: string; profile: Record<string, unknown> }) {
+    return this.authService.updateProfile(body.email, body.profile);
   }
 }
