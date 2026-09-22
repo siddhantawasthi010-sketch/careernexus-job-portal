@@ -15,6 +15,13 @@ npm run start:dev
 2. Run [`supabase.sql`](supabase.sql) to create and seed the `users`, `otp_codes`, and `jobs` tables.
 3. Copy `.env.example` to `.env` and set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
+If OTP requests fail with `column users.profile does not exist`, the database was created from an older schema. Run the following in the same Supabase project's SQL Editor, then restart the API:
+
+```sql
+alter table public.users
+add column if not exists profile jsonb not null default '{}'::jsonb;
+```
+
 The service-role key is backend-only. Do not put it in either frontend application or commit it to source control.
 
 ## Endpoints
