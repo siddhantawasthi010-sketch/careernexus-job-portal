@@ -3,9 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { locationSuggestions } from '../shared/locations';
 import {
   Image,
   Alert,
+  Linking,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -18,6 +20,8 @@ import {
 } from 'react-native';
 
 const STORAGE_KEY = 'jobportal_user_profile_status';
+
+const getSalaryInputValue = (value = '') => value.replace(/^(INR|₹)\s*/i, '');
 
 const getApiBaseUrl = () => {
   const configuredUrl = Constants.expoConfig?.extra?.apiBaseUrl;
@@ -37,12 +41,14 @@ const defaultProfile = {
   photo: 'SA',
   contact: '+91 98765 43210',
   currentSalary: '₹18 LPA',
+  expectedSalary: '₹24 LPA',
   experience: '5+ years',
   education: 'B.Tech in Computer Science',
   skills: ['React', 'Node.js', 'TypeScript', 'AWS', 'SQL'],
   certifications: ['AWS Certified Developer', 'Google UX Design'],
   languages: ['English', 'Hindi'],
   location: 'Bengaluru, India',
+  preferredLocation: 'Bengaluru, India',
 };
 
 const jobs = [
@@ -223,6 +229,37 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+function LocationField({ label, value, onChange }) {
+  const [query, setQuery] = useState(value || '');
+  const [isFocused, setIsFocused] = useState(false);
+  const suggestions = query.trim()
+    ? locationSuggestions.filter((location) => location.toLowerCase().includes(query.trim().toLowerCase()))
+    : [];
+  const selectLocation = (location) => {
+    setQuery(location);
+    onChange(location);
+    setIsFocused(false);
+  };
+
+  return (
+    <View style={styles.locationField}>
+      <Text style={styles.locationLabel}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={query}
+        onChangeText={(text) => { setQuery(text); onChange(text); }}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setTimeout(() => setIsFocused(false), 120)}
+        placeholder="Start typing a city"
+        placeholderTextColor="#8aa3c2"
+      />
+      {isFocused && suggestions.length > 0 && <ScrollView style={styles.locationSuggestions} nestedScrollEnabled>
+        {suggestions.map((location) => <TouchableOpacity key={location} style={styles.locationSuggestion} onPressIn={() => selectLocation(location)}><Text style={styles.locationSuggestionText}>{location}</Text></TouchableOpacity>)}
+      </ScrollView>}
+    </View>
+  );
+}
+
 function ProfileForm({ profile, onSave, onSkip, isEditing }) {
   const [form, setForm] = useState(profile);
 
@@ -231,25 +268,229 @@ function ProfileForm({ profile, onSave, onSkip, isEditing }) {
   return (
     <SafeAreaView style={styles.containerDark}>
       <StatusBar barStyle="light-content" />
-      <View style={styles.formCard}>
-        <Text style={styles.sectionHeading}>Complete your professional profile</Text>
-        <TextInput style={styles.input} value={form.name} onChangeText={(text) => updateField('name', text)} placeholder="Name" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.contact} onChangeText={(text) => updateField('contact', text)} placeholder="Contact" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.location} onChangeText={(text) => updateField('location', text)} placeholder="Current location" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.currentSalary} onChangeText={(text) => updateField('currentSalary', text)} placeholder="Current salary" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.experience} onChangeText={(text) => updateField('experience', text)} placeholder="Experience" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.education} onChangeText={(text) => updateField('education', text)} placeholder="Education" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.skills.join(', ')} onChangeText={(text) => updateField('skills', text.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="Skills" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.certifications.join(', ')} onChangeText={(text) => updateField('certifications', text.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="Certifications" placeholderTextColor="#8aa3c2" />
-        <TextInput style={styles.input} value={form.languages.join(', ')} onChangeText={(text) => updateField('languages', text.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="Languages" placeholderTextColor="#8aa3c2" />
+      <ScrollView style={styles.formScroll} contentContainerStyle={styles.formScrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.formCard}>
+          <Text style={styles.sectionHeading}>Complete your professional profile</Text>
+          <TextInput style={styles.input} value={form.name} onChangeText={(text) => updateField('name', text)} placeholder="Name" placeholderTextColor="#8aa3c2" />
+          <TextInput style={styles.input} value={form.contact} onChangeText={(text) => updateField('contact', text)} placeholder="Contact" placeholderTextColor="#8aa3c2" />
+          <LocationField label="Current location" value={form.location} onChange={(value) => updateField('location', value)} />
+          <LocationField label="Preferred location" value={form.preferredLocation} onChange={(value) => updateField('preferredLocation', value)} />
+          <View style={styles.salaryField}><Text style={styles.locationLabel}>Current salary</Text><View style={styles.salaryInput}><Text style={styles.salaryPrefix}>INR</Text><TextInput style={styles.salaryTextInput} value={getSalaryInputValue(form.currentSalary)} onChangeText={(text) => updateField('currentSalary', text ? `INR ${text}` : '')} placeholder="Enter amount" placeholderTextColor="#8aa3c2" /></View></View>
+          <View style={styles.salaryField}><Text style={styles.locationLabel}>Expected salary</Text><View style={styles.salaryInput}><Text style={styles.salaryPrefix}>INR</Text><TextInput style={styles.salaryTextInput} value={getSalaryInputValue(form.expectedSalary)} onChangeText={(text) => updateField('expectedSalary', text ? `INR ${text}` : '')} placeholder="Enter amount" placeholderTextColor="#8aa3c2" /></View></View>
+          <TextInput style={styles.input} value={form.experience} onChangeText={(text) => updateField('experience', text)} placeholder="Experience" placeholderTextColor="#8aa3c2" />
+          <TextInput style={styles.input} value={form.education} onChangeText={(text) => updateField('education', text)} placeholder="Education" placeholderTextColor="#8aa3c2" />
+          <TextInput style={styles.input} value={form.skills.join(', ')} onChangeText={(text) => updateField('skills', text.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="Skills" placeholderTextColor="#8aa3c2" />
+          <TextInput style={styles.input} value={form.certifications.join(', ')} onChangeText={(text) => updateField('certifications', text.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="Certifications" placeholderTextColor="#8aa3c2" />
+          <TextInput style={styles.input} value={form.languages.join(', ')} onChangeText={(text) => updateField('languages', text.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="Languages" placeholderTextColor="#8aa3c2" />
 
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={onSkip}><Text style={styles.secondaryButtonText}>Later</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.primaryButton} onPress={() => onSave(form)}><Text style={styles.primaryButtonText}>{isEditing ? 'Update profile' : 'Create profile'}</Text></TouchableOpacity>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.secondaryButton} onPress={onSkip}><Text style={styles.secondaryButtonText}>Later</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => onSave(form)}><Text style={styles.primaryButtonText}>{isEditing ? 'Update profile' : 'Create profile'}</Text></TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
+}
+
+function LibraryTopics({ topics }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeLetter, setActiveLetter] = useState('All');
+  const [expandedTopics, setExpandedTopics] = useState(new Set());
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const availableLetters = new Set(topics.map((topic) => topic.name.charAt(0).toUpperCase()));
+  const filteredTopics = topics.filter((topic) => {
+    const matchesLetter = activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
+    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.example]
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedQuery);
+    return matchesLetter && matchesSearch;
+  });
+
+  const toggleTopic = (topicName) => {
+    setExpandedTopics((currentTopics) => {
+      const nextTopics = new Set(currentTopics);
+      if (nextTopics.has(topicName)) nextTopics.delete(topicName); else nextTopics.add(topicName);
+      return nextTopics;
+    });
+  };
+
+  return (
+    <View style={styles.librarySection}>
+      <Text style={styles.libraryEyebrow}>TESTING LIBRARY</Text>
+      <View style={styles.libraryHeader}>
+        <View style={styles.libraryTitleBlock}>
+          <Text style={styles.libraryTitle}>Software testing topics</Text>
+          <Text style={styles.libraryIntro}>Build a stronger testing foundation, one concept at a time.</Text>
+        </View>
+        <Text style={styles.topicCount}>{filteredTopics.length} topics</Text>
+      </View>
+
+      <Text style={styles.librarySearchLabel}>Search topics</Text>
+      <TextInput
+        style={styles.librarySearch}
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        placeholder="Search by topic, concept, or example"
+        placeholderTextColor="#64748b"
+      />
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.alphabetScroll} contentContainerStyle={styles.alphabetFilter}>
+        <TouchableOpacity style={[styles.alphabetButton, activeLetter === 'All' && styles.alphabetButtonActive]} onPress={() => setActiveLetter('All')}>
+          <Text style={[styles.alphabetButtonText, activeLetter === 'All' && styles.alphabetButtonTextActive]}>All</Text>
+        </TouchableOpacity>
+        {alphabet.map((letter) => {
+          const isAvailable = availableLetters.has(letter);
+          return (
+            <TouchableOpacity
+              key={letter}
+              style={[styles.alphabetButton, activeLetter === letter && styles.alphabetButtonActive, !isAvailable && styles.alphabetButtonDisabled]}
+              onPress={() => setActiveLetter(letter)}
+              disabled={!isAvailable}
+            >
+              <Text style={[styles.alphabetButtonText, activeLetter === letter && styles.alphabetButtonTextActive, !isAvailable && styles.alphabetButtonTextDisabled]}>{letter}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {filteredTopics.map((topic) => {
+        const isExpanded = expandedTopics.has(topic.name);
+        return (
+          <View key={topic.name} style={styles.topicCard}>
+            <TouchableOpacity style={styles.topicToggle} onPress={() => toggleTopic(topic.name)} accessibilityState={{ expanded: isExpanded }}>
+              <Text style={styles.topicTitle}>{topic.name}</Text>
+              <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={21} color="#172638" />
+            </TouchableOpacity>
+            {isExpanded && <View style={styles.topicDetails}>
+              <Text style={styles.topicBrief}>{topic.briefDescription}</Text>
+              <Text style={styles.topicFieldTitle}>Explanation in detail</Text>
+              <Text style={styles.topicExplanation}>{topic.explanation}</Text>
+              <Text style={styles.topicFieldTitle}>Example</Text>
+              <View style={styles.topicExample}>
+                <Text style={styles.topicExampleText}>{topic.example}</Text>
+              </View>
+            </View>}
+          </View>
+        );
+      })}
+
+      {filteredTopics.length === 0 && <Text style={styles.emptyLibrary}>No testing topics match “{searchQuery}”.</Text>}
+    </View>
+  );
+}
+
+function LibraryView() {
+  const [topics, setTopics] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadTopics = async () => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/library/topics`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load library topics');
+        setTopics(Array.isArray(data) ? data : []);
+      } catch (loadError) {
+        setError(loadError.message || 'Unable to load library topics');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadTopics();
+  }, []);
+
+  if (loading) return <View style={styles.libraryStatus}><Text style={styles.libraryStatusText}>Loading testing topics...</Text></View>;
+  if (error) return <View style={styles.libraryStatus}><Text style={styles.libraryStatusError}>{error}</Text></View>;
+
+  return <LibraryTopics topics={topics} />;
+}
+
+function CoursesList({ courses }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredCourses = courses.filter((course) => (
+    [course.title, course.topic, course.provider, course.level, course.duration]
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedQuery)
+  ));
+
+  return (
+    <View style={styles.coursesSection}>
+      <Text style={styles.coursesEyebrow}>LEARNING PATHS</Text>
+      <View style={styles.coursesHeader}>
+        <View style={styles.coursesTitleBlock}>
+          <Text style={styles.coursesTitle}>Online courses</Text>
+          <Text style={styles.coursesIntro}>Practical courses for testing topics and skills commonly listed in job descriptions.</Text>
+        </View>
+        <Text style={styles.courseCount}>{filteredCourses.length} courses</Text>
+      </View>
+
+      <Text style={styles.coursesSearchLabel}>Search courses</Text>
+      <TextInput
+        style={styles.coursesSearch}
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        placeholder="Search by skill, topic, or provider"
+        placeholderTextColor="#64748b"
+      />
+
+      {filteredCourses.map((course) => (
+        <View key={course.title} style={styles.courseCard}>
+          <View style={styles.courseCardHeader}>
+            <View style={styles.courseTitleBlock}>
+              <Text style={styles.courseTopic}>{course.topic}</Text>
+              <Text style={styles.courseTitle}>{course.title}</Text>
+            </View>
+            <Text style={styles.courseLevel}>{course.level}</Text>
+          </View>
+          <View style={styles.courseMeta}>
+            <Text style={styles.courseMetaText}>{course.provider}</Text>
+            <Text style={styles.courseMetaText}>{course.duration}</Text>
+          </View>
+          <TouchableOpacity style={styles.courseLink} onPress={() => Linking.openURL(course.url)}>
+            <Text style={styles.courseLinkText}>View course</Text>
+            <Ionicons name="open-outline" size={16} color="#1d4ed8" />
+          </TouchableOpacity>
+        </View>
+      ))}
+
+      {filteredCourses.length === 0 && <Text style={styles.emptyLibrary}>No courses match “{searchQuery}”.</Text>}
+    </View>
+  );
+}
+
+function CoursesView() {
+  const [courseList, setCourseList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadCourses = async () => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/courses`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load courses');
+        setCourseList(Array.isArray(data) ? data : []);
+      } catch (loadError) {
+        setError(loadError.message || 'Unable to load courses');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCourses();
+  }, []);
+
+  if (loading) return <View style={styles.libraryStatus}><Text style={styles.libraryStatusText}>Loading courses...</Text></View>;
+  if (error) return <View style={styles.libraryStatus}><Text style={styles.libraryStatusError}>{error}</Text></View>;
+
+  return <CoursesList courses={courseList} />;
 }
 
 function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePicture }) {
@@ -302,7 +543,7 @@ function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePict
           </TouchableOpacity>
         </View>
 
-        <View style={styles.profileCard}>
+        {activeNav === 'Profile' && <View style={styles.profileCard}>
           <TouchableOpacity style={styles.avatarWrap} onPress={editProfilePicture}>
             <View style={styles.avatar}>
               {isProfileImageUri(selectedPhoto) ? (
@@ -321,9 +562,9 @@ function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePict
           <TouchableOpacity style={styles.updateButton} onPress={onUpdateProfile}>
             <Text style={styles.updateButtonText}>Update Profile</Text>
           </TouchableOpacity>
-        </View>
+        </View>}
 
-        <View style={styles.statsRow}>
+        {activeNav === 'Home' && <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>15</Text>
             <Text style={styles.statLabel}>Search Appearance</Text>
@@ -334,9 +575,9 @@ function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePict
             <Text style={styles.statLabel}>Recruiters Activity</Text>
             <Text style={styles.statMeta}>Last 30 days</Text>
           </View>
-        </View>
+        </View>}
 
-        <View style={styles.jobsSection}>
+        {activeNav === 'Apply' && <View style={styles.jobsSection}>
           <View style={styles.sectionTitleRow}>
             <Text style={styles.sectionTitle}>Jobs</Text>
             <Text style={styles.linkText}>View All</Text>
@@ -365,9 +606,9 @@ function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePict
               </View>
             </View>
           ))}
-        </View>
+        </View>}
 
-        <View style={styles.profileSection}>
+        {activeNav === 'Profile' && <View style={styles.profileSection}>
           <Text style={styles.sectionTitle}>Profile</Text>
           <View style={styles.profileGrid}>
             <Text style={styles.profileDetail}><Text style={styles.detailLabel}>Name:</Text> {profile.name}</Text>
@@ -376,11 +617,17 @@ function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePict
             <Text style={styles.profileDetail}><Text style={styles.detailLabel}>Experience:</Text> {profile.experience}</Text>
             <Text style={styles.profileDetail}><Text style={styles.detailLabel}>Education:</Text> {profile.education}</Text>
             <Text style={styles.profileDetail}><Text style={styles.detailLabel}>Location:</Text> {profile.location}</Text>
+            <Text style={styles.profileDetail}><Text style={styles.detailLabel}>Preferred Location:</Text> {profile.preferredLocation}</Text>
+            <Text style={styles.profileDetail}><Text style={styles.detailLabel}>Expected Salary:</Text> {profile.expectedSalary}</Text>
             <Text style={[styles.profileDetail, styles.fullWidth]}><Text style={styles.detailLabel}>Skills:</Text> {profile.skills.join(', ')}</Text>
             <Text style={[styles.profileDetail, styles.fullWidth]}><Text style={styles.detailLabel}>Certifications:</Text> {profile.certifications.join(', ')}</Text>
             <Text style={[styles.profileDetail, styles.fullWidth]}><Text style={styles.detailLabel}>Languages:</Text> {profile.languages.join(', ')}</Text>
           </View>
-        </View>
+        </View>}
+
+        {activeNav === 'Library' && <LibraryView />}
+
+        {activeNav === 'Courses' && <CoursesView />}
       </ScrollView>
       <View style={styles.bottomNav}>
         {navigationItems.map((item) => {
@@ -391,7 +638,6 @@ function HomeDashboard({ profile, onUpdateProfile, onLogout, onUpdateProfilePict
               style={styles.bottomNavItem}
               onPress={() => {
                 setActiveNav(item.label);
-                if (item.label === 'Profile') onUpdateProfile();
               }}
             >
               <Ionicons name={isActive && item.activeIcon ? item.activeIcon : item.icon} size={23} color={isActive ? '#2563eb' : '#64748b'} />
@@ -555,6 +801,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#20304d',
   },
+  formScroll: {
+    width: '100%',
+  },
+  formScrollContent: {
+    flexGrow: 1,
+    paddingVertical: 18,
+    justifyContent: 'center',
+  },
   sectionHeading: {
     color: '#fff',
     fontSize: 24,
@@ -620,6 +874,63 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 12,
+  },
+  locationField: {
+    position: 'relative',
+    zIndex: 20,
+    elevation: 20,
+  },
+  locationLabel: {
+    color: '#dfeafc',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  locationSuggestions: {
+    position: 'absolute',
+    top: 76,
+    left: 0,
+    right: 0,
+    zIndex: 5,
+    elevation: 25,
+    maxHeight: 220,
+    backgroundColor: '#fff',
+    borderColor: '#d0dbe8',
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  locationSuggestion: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomColor: '#e2e8f0',
+    borderBottomWidth: 1,
+  },
+  locationSuggestionText: {
+    color: '#172638',
+    fontSize: 14,
+  },
+  salaryField: {
+    zIndex: 1,
+    marginBottom: 12,
+  },
+  salaryInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0e1a2d',
+    borderColor: '#20304d',
+    borderWidth: 1,
+    borderRadius: 12,
+  },
+  salaryPrefix: {
+    color: '#dbeafe',
+    fontWeight: '800',
+    paddingLeft: 14,
+  },
+  salaryTextInput: {
+    flex: 1,
+    color: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -929,6 +1240,297 @@ const styles = StyleSheet.create({
     color: '#334155',
     fontSize: 15,
     fontWeight: '600',
+  },
+  librarySection: {
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 24,
+    padding: 16,
+    marginBottom: 18,
+  },
+  libraryEyebrow: {
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 5,
+  },
+  libraryHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 18,
+  },
+  libraryTitleBlock: {
+    flex: 1,
+  },
+  libraryTitle: {
+    color: '#111827',
+    fontSize: 23,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  libraryIntro: {
+    color: '#475569',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  topicCount: {
+    color: '#1d4ed8',
+    backgroundColor: '#dbeafe',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  librarySearchLabel: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 7,
+  },
+  librarySearch: {
+    backgroundColor: 'rgba(255,255,255,0.76)',
+    borderColor: 'rgba(37,99,235,0.25)',
+    borderWidth: 1,
+    borderRadius: 12,
+    color: '#172638',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 16,
+  },
+  alphabetScroll: {
+    marginBottom: 16,
+  },
+  alphabetFilter: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingRight: 8,
+  },
+  alphabetButton: {
+    minWidth: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(37,99,235,0.2)',
+  },
+  alphabetButtonActive: {
+    backgroundColor: '#2563eb',
+  },
+  alphabetButtonDisabled: {
+    opacity: 0.35,
+  },
+  alphabetButtonText: {
+    color: '#1d4ed8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  alphabetButtonTextActive: {
+    color: '#fff',
+  },
+  alphabetButtonTextDisabled: {
+    color: '#64748b',
+  },
+  topicCard: {
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    borderColor: 'rgba(15,23,42,0.08)',
+    borderWidth: 1,
+    borderRadius: 16,
+    marginBottom: 14,
+  },
+  topicToggle: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  topicDetails: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  topicTitle: {
+    color: '#172638',
+    fontSize: 17,
+    fontWeight: '800',
+    flex: 1,
+  },
+  topicBrief: {
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  topicFieldTitle: {
+    color: '#1d4ed8',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 5,
+  },
+  topicExplanation: {
+    color: '#334155',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  topicExample: {
+    backgroundColor: '#172638',
+    borderRadius: 10,
+    padding: 12,
+  },
+  topicExampleText: {
+    color: '#dbeafe',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  emptyLibrary: {
+    color: '#475569',
+    textAlign: 'center',
+    paddingVertical: 22,
+  },
+  libraryStatus: {
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 24,
+    padding: 28,
+    marginBottom: 18,
+  },
+  libraryStatusText: {
+    color: '#475569',
+    textAlign: 'center',
+  },
+  libraryStatusError: {
+    color: '#b91c1c',
+    textAlign: 'center',
+  },
+  coursesSection: {
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 24,
+    padding: 16,
+    marginBottom: 18,
+  },
+  coursesEyebrow: {
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 5,
+  },
+  coursesHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 18,
+  },
+  coursesTitleBlock: {
+    flex: 1,
+  },
+  coursesTitle: {
+    color: '#111827',
+    fontSize: 23,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  coursesIntro: {
+    color: '#475569',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  courseCount: {
+    color: '#1d4ed8',
+    backgroundColor: '#dbeafe',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  coursesSearchLabel: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 7,
+  },
+  coursesSearch: {
+    backgroundColor: 'rgba(255,255,255,0.76)',
+    borderColor: 'rgba(37,99,235,0.25)',
+    borderWidth: 1,
+    borderRadius: 12,
+    color: '#172638',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 16,
+  },
+  courseCard: {
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    borderColor: 'rgba(15,23,42,0.08)',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+  },
+  courseCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  courseTitleBlock: {
+    flex: 1,
+  },
+  courseTopic: {
+    color: '#2563eb',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 5,
+    textTransform: 'uppercase',
+  },
+  courseTitle: {
+    color: '#172638',
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  courseLevel: {
+    color: '#1d4ed8',
+    backgroundColor: '#dbeafe',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  courseMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 12,
+  },
+  courseMetaText: {
+    color: '#475569',
+    flexShrink: 1,
+    fontSize: 12,
+  },
+  courseLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    marginTop: 12,
+  },
+  courseLinkText: {
+    color: '#1d4ed8',
+    fontSize: 13,
+    fontWeight: '800',
   },
   profileSection: {
     backgroundColor: 'rgba(255,255,255,0.35)',

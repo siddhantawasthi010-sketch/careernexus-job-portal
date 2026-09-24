@@ -28,6 +28,24 @@ export interface JobRecord {
   featured: boolean;
 }
 
+export interface LibraryTopicRecord {
+  id: number;
+  name: string;
+  briefDescription: string;
+  explanation: string;
+  example: string;
+}
+
+export interface CourseRecord {
+  id: number;
+  title: string;
+  topic: string;
+  provider: string;
+  level: string;
+  duration: string;
+  url: string;
+}
+
 @Injectable()
 export class DatabaseService {
   private readonly client: SupabaseClient;
@@ -127,5 +145,40 @@ export class DatabaseService {
       throw new Error(`Unable to load jobs: ${error.message}`);
     }
     return (data || []) as JobRecord[];
+  }
+
+  async getLibraryTopics(): Promise<LibraryTopicRecord[]> {
+    const { data, error } = await this.client
+      .from('library_topics')
+      .select('id, name, brief_description, explanation, example')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      throw new Error(`Unable to load library topics: ${error.message}`);
+    }
+
+    return (data || []).map((topic) => ({
+      id: topic.id,
+      name: topic.name,
+      briefDescription: topic.brief_description,
+      explanation: topic.explanation,
+      example: topic.example,
+    })) as LibraryTopicRecord[];
+  }
+
+  async getCourses(): Promise<CourseRecord[]> {
+    const { data, error } = await this.client
+      .from('courses')
+      .select('id, title, topic, provider, level, duration, url')
+      .eq('is_active', true)
+      .order('topic', { ascending: true })
+      .order('title', { ascending: true });
+
+    if (error) {
+      throw new Error(`Unable to load courses: ${error.message}`);
+    }
+
+    return (data || []) as CourseRecord[];
   }
 }

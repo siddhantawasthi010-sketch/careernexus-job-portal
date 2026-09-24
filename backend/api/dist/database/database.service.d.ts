@@ -21,6 +21,22 @@ export interface JobRecord {
     salary: string | null;
     featured: boolean;
 }
+export interface LibraryTopicRecord {
+    id: number;
+    name: string;
+    briefDescription: string;
+    explanation: string;
+    example: string;
+}
+export interface CourseRecord {
+    id: number;
+    title: string;
+    topic: string;
+    provider: string;
+    level: string;
+    duration: string;
+    url: string;
+}
 export declare class DatabaseService {
     private readonly client;
     constructor();
@@ -41,4 +57,6 @@ export declare class DatabaseService {
     }): Promise<void>;
     deleteOtps(email: string): Promise<void>;
     getJobs(featured?: boolean): Promise<JobRecord[]>;
+    getLibraryTopics(): Promise<LibraryTopicRecord[]>;
+    getCourses(): Promise<CourseRecord[]>;
 }

@@ -95,6 +95,35 @@ let DatabaseService = class DatabaseService {
         }
         return (data || []);
     }
+    async getLibraryTopics() {
+        const { data, error } = await this.client
+            .from('library_topics')
+            .select('id, name, brief_description, explanation, example')
+            .eq('is_active', true)
+            .order('name', { ascending: true });
+        if (error) {
+            throw new Error(`Unable to load library topics: ${error.message}`);
+        }
+        return (data || []).map((topic) => ({
+            id: topic.id,
+            name: topic.name,
+            briefDescription: topic.brief_description,
+            explanation: topic.explanation,
+            example: topic.example,
+        }));
+    }
+    async getCourses() {
+        const { data, error } = await this.client
+            .from('courses')
+            .select('id, title, topic, provider, level, duration, url')
+            .eq('is_active', true)
+            .order('topic', { ascending: true })
+            .order('title', { ascending: true });
+        if (error) {
+            throw new Error(`Unable to load courses: ${error.message}`);
+        }
+        return (data || []);
+    }
 };
 exports.DatabaseService = DatabaseService;
 exports.DatabaseService = DatabaseService = __decorate([
