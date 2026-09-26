@@ -459,19 +459,12 @@ function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit 
 }
 
 function LibraryTopics({ topics }) {
-  const [searchQuery, setSearchQuery] = useState('');
   const [activeLetter, setActiveLetter] = useState('All');
   const [expandedTopics, setExpandedTopics] = useState(new Set());
-  const normalizedQuery = searchQuery.trim().toLowerCase();
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
   const availableLetters = new Set(topics.map((topic) => topic.name.charAt(0).toUpperCase()));
   const filteredTopics = topics.filter((topic) => {
-    const matchesLetter = activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
-    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.example]
-      .join(' ')
-      .toLowerCase()
-      .includes(normalizedQuery);
-    return matchesLetter && matchesSearch;
+    return activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
   });
 
   const toggleTopic = (topicName) => {
@@ -492,15 +485,6 @@ function LibraryTopics({ topics }) {
         </View>
         <Text style={styles.topicCount}>{filteredTopics.length} topics</Text>
       </View>
-
-      <Text style={styles.librarySearchLabel}>Search topics</Text>
-      <TextInput
-        style={styles.librarySearch}
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        placeholder="Search by topic, concept, or example"
-        placeholderTextColor="#64748b"
-      />
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.alphabetScroll} contentContainerStyle={styles.alphabetFilter}>
         <TouchableOpacity style={[styles.alphabetButton, activeLetter === 'All' && styles.alphabetButtonActive]} onPress={() => setActiveLetter('All')}>
@@ -542,7 +526,7 @@ function LibraryTopics({ topics }) {
         );
       })}
 
-      {filteredTopics.length === 0 && <Text style={styles.emptyLibrary}>No testing topics match “{searchQuery}”.</Text>}
+      {filteredTopics.length === 0 && <Text style={styles.emptyLibrary}>No testing topics available.</Text>}
     </View>
   );
 }
@@ -576,15 +560,6 @@ function LibraryView() {
 }
 
 function CoursesList({ courses }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const normalizedQuery = searchQuery.trim().toLowerCase();
-  const filteredCourses = courses.filter((course) => (
-    [course.title, course.topic, course.provider, course.level, course.duration]
-      .join(' ')
-      .toLowerCase()
-      .includes(normalizedQuery)
-  ));
-
   return (
     <View style={styles.coursesSection}>
       <Text style={styles.coursesEyebrow}>LEARNING PATHS</Text>
@@ -593,19 +568,10 @@ function CoursesList({ courses }) {
           <Text style={styles.coursesTitle}>Online courses</Text>
           <Text style={styles.coursesIntro}>Practical courses for testing topics and skills commonly listed in job descriptions.</Text>
         </View>
-        <Text style={styles.courseCount}>{filteredCourses.length} courses</Text>
+        <Text style={styles.courseCount}>{courses.length} courses</Text>
       </View>
 
-      <Text style={styles.coursesSearchLabel}>Search courses</Text>
-      <TextInput
-        style={styles.coursesSearch}
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        placeholder="Search by skill, topic, or provider"
-        placeholderTextColor="#64748b"
-      />
-
-      {filteredCourses.map((course) => (
+      {courses.map((course) => (
         <View key={course.title} style={styles.courseCard}>
           <View style={styles.courseCardHeader}>
             <View style={styles.courseTitleBlock}>
@@ -625,7 +591,7 @@ function CoursesList({ courses }) {
         </View>
       ))}
 
-      {filteredCourses.length === 0 && <Text style={styles.emptyLibrary}>No courses match “{searchQuery}”.</Text>}
+      {courses.length === 0 && <Text style={styles.emptyLibrary}>No courses available.</Text>}
     </View>
   );
 }
@@ -842,11 +808,11 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
             <Text style={styles.logoutButtonText}>Log out</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.jobsSearchBox}>
+        {(activeNav === 'Home' || activeNav === 'Apply') && <View style={styles.jobsSearchBox}>
           <Ionicons name="search-outline" size={18} color="#5b6d7b" />
           <TextInput value={jobSearchQuery} onChangeText={handleJobSearchChange} placeholder="Search jobs by keyword, company, city, or skill" placeholderTextColor="#74838e" style={styles.jobsSearchInput} returnKeyType="search" accessibilityLabel="Search jobs" />
           {jobSearchQuery ? <TouchableOpacity onPress={() => setJobSearchQuery('')} accessibilityLabel="Clear job search"><Ionicons name="close-circle" size={18} color="#74838e" /></TouchableOpacity> : null}
-        </View>
+        </View>}
 
         {activeNav === 'Profile' && <View style={styles.profileCard}>
           <View style={styles.profileHeroRow}>
@@ -1301,15 +1267,13 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   loginLogo: {
-    width: '30%',
-    alignSelf: 'center',
-    aspectRatio: 1.78,
+    width: '100%',
+    height: 150,
     marginBottom: 18,
   },
   loginServices: {
-    width: '30%',
-    alignSelf: 'center',
-    aspectRatio: 2.67,
+    width: '100%',
+    height: 100,
     marginTop: 20,
   },
   logoText: {
