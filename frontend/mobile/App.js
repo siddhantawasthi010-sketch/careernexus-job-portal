@@ -1301,12 +1301,14 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   loginLogo: {
-    width: '100%',
+    width: '30%',
+    alignSelf: 'center',
     aspectRatio: 1.78,
     marginBottom: 18,
   },
   loginServices: {
-    width: '100%',
+    width: '30%',
+    alignSelf: 'center',
     aspectRatio: 2.67,
     marginTop: 20,
   },
