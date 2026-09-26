@@ -1,6 +1,6 @@
-# Job Portal: End-to-End Project Guide
+# CareerNexus: End-to-End Project Guide
 
-This document explains the Job Portal project from the repository root down to the runtime request flow. It describes what currently exists in the codebase, how the pieces communicate, how to run the complete system, how to test the candidate and recruiter journeys, and what must be added before production deployment.
+This document explains the CareerNexus project from the repository root down to the runtime request flow. It describes what currently exists in the codebase, how the pieces communicate, how to run the complete system, how to test the candidate and recruiter journeys, and what must be added before production deployment.
 
 ## 1. What This Project Is
 
@@ -27,7 +27,7 @@ The current implementation is intentionally lightweight. Jobs, known users, and 
 ## 2. Repository Layout
 
 ```text
-job-portal/
+careernexus-job-portal/
 ├── backend/
 │   └── api/
 │       ├── src/
@@ -171,7 +171,7 @@ GET /health
 ```json
 {
   "status": "ok",
-  "service": "job-portal-api",
+  "service": "careernexus-job-portal-api",
   "message": "API is running successfully."
 }
 ```
@@ -276,7 +276,7 @@ The resend method calls the same OTP generation logic. The 30-second cooldown pr
 The current token is:
 
 ```text
-demo-jwt-token-for-job-portal
+demo-jwt-token-for-careernexus-job-portal
 ```
 
 It is not a signed token and must be replaced with JWT or another secure session mechanism before production.

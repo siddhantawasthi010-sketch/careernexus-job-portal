@@ -1,7 +1,7 @@
 {
-  "name": "job-portal-api",
+  "name": "careernexus-job-portal-api",
   "version": "1.0.0",
-  "description": "NestJS backend for the Job Portal application",
+  "description": "NestJS backend for the CareerNexus Job Portal application",
   "private": true,
   "scripts": {
     "build": "nest build",

@@ -52,6 +52,31 @@ export interface JobRecord {
   featured: boolean;
 }
 
+export interface CareerPortalRecord {
+  slug: string;
+  companyName: string;
+  industry: string;
+  careerUrl: string;
+}
+
+export interface FeedJobRecord {
+  id: string;
+  source: string;
+  sourceId: string;
+  title: string;
+  company: string;
+  location: string;
+  type: string;
+  jobType: string | null;
+  employmentType: string | null;
+  preferredShift: string | null;
+  description: string;
+  salary: string | null;
+  url: string;
+  postedAt: string | null;
+  matchScore: number;
+}
+
 export interface LibraryTopicRecord {
   id: number;
   name: string;
@@ -74,6 +99,12 @@ const toSqlDate = (value?: string) => {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : null;
+};
+
+const toSqlTimestamp = (value?: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(value.trim())) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 };
 
 @Injectable()
@@ -361,6 +392,82 @@ export class DatabaseService {
       throw new Error(`Unable to load jobs: ${error.message}`);
     }
     return (data || []) as JobRecord[];
+  }
+
+  async getCareerPortals(): Promise<CareerPortalRecord[]> {
+    const { data, error } = await this.client
+      .from('career_portals')
+      .select('slug, company_name, industry, career_url')
+      .eq('is_active', true)
+      .order('company_name', { ascending: true });
+    if (error) throw new Error(`Unable to load career portals: ${error.message}`);
+    return (data || []).map((portal) => ({
+      slug: portal.slug,
+      companyName: portal.company_name,
+      industry: portal.industry,
+      careerUrl: portal.career_url,
+    }));
+  }
+
+  async saveFeedJobs(jobs: FeedJobRecord[]): Promise<void> {
+    if (!jobs.length) return;
+    const rows = jobs.map((job) => ({
+      id: job.id,
+      source: job.source,
+      source_id: job.sourceId,
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      type: job.type,
+      job_type: job.jobType,
+      employment_type: job.employmentType,
+      preferred_shift: job.preferredShift,
+      description: job.description,
+      salary: job.salary,
+      url: job.url,
+      posted_at: toSqlTimestamp(job.postedAt),
+      fetched_at: new Date().toISOString(),
+    }));
+    for (let start = 0; start < rows.length; start += 100) {
+      const { error } = await this.client.from('job_feed_items').upsert(rows.slice(start, start + 100), { onConflict: 'id' });
+      if (error) throw new Error(`Unable to cache fetched jobs: ${error.message}`);
+    }
+  }
+
+  async getRecentFeedJobs(): Promise<FeedJobRecord[]> {
+    const fetchedAfter = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const pageSize = 1000;
+    const jobs: FeedJobRecord[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await this.client
+        .from('job_feed_items')
+        .select('id, source, source_id, title, company, location, type, job_type, employment_type, preferred_shift, description, salary, url, posted_at')
+        .gte('fetched_at', fetchedAfter)
+        .order('fetched_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw new Error(`Unable to load cached jobs: ${error.message}`);
+      const page = data || [];
+      jobs.push(...page.map((job) => ({
+        id: job.id,
+        source: job.source,
+        sourceId: job.source_id,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        type: job.type,
+        jobType: job.job_type,
+        employmentType: job.employment_type,
+        preferredShift: job.preferred_shift,
+        description: job.description,
+        salary: job.salary,
+        url: job.url,
+        postedAt: job.posted_at,
+        matchScore: 0,
+      })));
+      if (page.length < pageSize) break;
+    }
+    return jobs;
   }
 
   async getUserJobApplications(email: string): Promise<Record<string, unknown>[]> {

@@ -1,8 +1,12 @@
 {
   "expo": {
-    "name": "Job Portal Mobile",
-    "slug": "job-portal-mobile",
+    "name": "CareerNexus",
+    "slug": "careernexus-job-portal-mobile",
     "version": "1.0.0",
+    "android": {
+      "package": "com.careernexus.jobportal",
+      "versionCode": 1
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [

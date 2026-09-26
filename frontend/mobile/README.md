@@ -1,6 +1,6 @@
-# Job Portal Mobile
+# CareerNexus Mobile
 
-This is the React Native mobile starter for the job portal.
+This is the React Native mobile app for CareerNexus.
 
 ## Run the app
 
@@ -12,6 +12,6 @@ npx expo start
 ## Features included
 
 - Home screen
-- Job portal branding
+- CareerNexus branding
 - Candidate and recruiter CTA cards
 - Mobile-first design starter

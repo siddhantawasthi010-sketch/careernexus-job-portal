@@ -1,4 +1,4 @@
-# Job Portal Architecture
+# CareerNexus Job Portal Architecture
 
 ## Overview
 

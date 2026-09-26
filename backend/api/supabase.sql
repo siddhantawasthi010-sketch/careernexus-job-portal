@@ -84,6 +84,36 @@ create table if not exists public.jobs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.career_portals (
+  slug text primary key,
+  company_name text not null,
+  industry text not null,
+  career_url text not null,
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.job_feed_items (
+  id text primary key,
+  source text not null,
+  source_id text not null,
+  title text not null,
+  company text not null,
+  location text not null default '',
+  type text not null default 'Not specified',
+  job_type text,
+  employment_type text,
+  preferred_shift text,
+  description text not null default '',
+  salary text,
+  url text not null,
+  posted_at timestamptz,
+  fetched_at timestamptz not null default now()
+);
+
+create index if not exists job_feed_items_fetched_at_idx on public.job_feed_items (fetched_at desc);
+create index if not exists job_feed_items_company_idx on public.job_feed_items (company);
+
 create table if not exists public.user_job_applications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
@@ -129,24 +159,63 @@ alter table public.user_employment_details enable row level security;
 alter table public.user_major_projects enable row level security;
 alter table public.otp_codes enable row level security;
 alter table public.jobs enable row level security;
+alter table public.career_portals enable row level security;
+alter table public.job_feed_items enable row level security;
 alter table public.user_job_applications enable row level security;
 alter table public.library_topics enable row level security;
 alter table public.courses enable row level security;
 
-insert into public.jobs (id, title, company, location, type, salary, featured)
+delete from public.jobs where company in ('NovaLabs', 'Streamline AI', 'Motive Studio', 'PixelForge', 'BluePeak');
+
+delete from public.career_portals where slug not in (
+  'tcs', 'infosys', 'hcltech', 'wipro', 'tech-mahindra', 'ltimindtree', 'cognizant', 'mphasis', 'persistent-systems', 'coforge',
+  'tata-motors', 'mahindra-group', 'bajaj-auto', 'tvs-motor', 'tata-steel', 'jsw-group', 'aditya-birla-group', 'reliance-industries', 'jindal-steel-power', 'larsen-toubro',
+  'tata-communications', 'bharti-airtel', 'indus-towers', 'dr-reddys', 'sun-pharma', 'cipla', 'lupin', 'biocon',
+  'asian-paints', 'titan-company', 'marico', 'godrej-group', 'dabur', 'tata-consumer-products'
+);
+
+insert into public.career_portals (slug, company_name, industry, career_url)
 values
-  (1, 'Frontend Developer', 'NovaLabs', 'Remote', 'Full-time', '$120k - $150k', false),
-  (2, 'Backend Engineer', 'Streamline AI', 'Bengaluru', 'Full-time', '$130k - $160k', false),
-  (3, 'UI/UX Designer', 'Motive Studio', 'Hyderabad', 'Contract', '$80k - $110k', false),
-  (101, 'Senior React Engineer', 'PixelForge', 'Remote', 'Hybrid', null, true),
-  (102, 'Product Designer', 'BluePeak', 'Pune', 'Full-time', null, true)
-on conflict (id) do update set
-  title = excluded.title,
-  company = excluded.company,
-  location = excluded.location,
-  type = excluded.type,
-  salary = excluded.salary,
-  featured = excluded.featured;
+  ('tcs', 'Tata Consultancy Services (TCS)', 'IT Services', 'https://www.tcs.com/careers'),
+  ('infosys', 'Infosys', 'IT Services', 'https://www.infosys.com/careers.html'),
+  ('hcltech', 'HCLTech', 'IT Services', 'https://careers.hcltech.com/job/'),
+  ('wipro', 'Wipro', 'IT Services', 'https://careers.wipro.com/'),
+  ('tech-mahindra', 'Tech Mahindra', 'IT Services', 'https://careers.techmahindra.com/'),
+  ('ltimindtree', 'LTIMindtree', 'IT Services', 'https://www.ltimindtree.com/careers/'),
+  ('cognizant', 'Cognizant India', 'IT Services', 'https://careers.cognizant.com/'),
+  ('mphasis', 'Mphasis', 'IT Services', 'https://careers.mphasis.com/'),
+  ('persistent-systems', 'Persistent Systems', 'IT Services', 'https://www.persistent.com/careers/'),
+  ('coforge', 'Coforge', 'IT Services', 'https://www.coforge.com/careers'),
+  ('tata-motors', 'Tata Motors', 'Automotive', 'https://careers.tatamotors.com/'),
+  ('mahindra-group', 'Mahindra Group', 'Conglomerate', 'https://jobs.mahindracareers.com/'),
+  ('bajaj-auto', 'Bajaj Auto', 'Automotive', 'https://www.bajajauto.com/careers'),
+  ('tvs-motor', 'TVS Motor', 'Automotive', 'https://www.tvsmotor.com/careers'),
+  ('tata-steel', 'Tata Steel', 'Steel', 'https://www.tatasteel.com/careers/'),
+  ('jsw-group', 'JSW Group', 'Diversified', 'https://www.jsw.in/careers'),
+  ('aditya-birla-group', 'Aditya Birla Group', 'Conglomerate', 'https://careers.adityabirla.com/'),
+  ('reliance-industries', 'Reliance Industries', 'Energy/Retail/Telecom', 'https://careers.ril.com/'),
+  ('jindal-steel-power', 'Jindal Steel & Power', 'Steel', 'https://www.jindalsteelpower.com/careers.html'),
+  ('larsen-toubro', 'Larsen & Toubro (L&T)', 'Engineering', 'https://careers.larsentoubro.com/'),
+  ('tata-communications', 'Tata Communications', 'Telecom', 'https://www.tatacommunications.com/careers/'),
+  ('bharti-airtel', 'Bharti Airtel', 'Telecom', 'https://www.airtel.com/careers'),
+  ('indus-towers', 'Indus Towers', 'Telecom Infrastructure', 'https://www.industowers.com/careers'),
+  ('dr-reddys', 'Dr. Reddy''s', 'Pharmaceuticals', 'https://careers.drreddys.com/'),
+  ('sun-pharma', 'Sun Pharma', 'Pharmaceuticals', 'https://sunpharma.com/careers'),
+  ('cipla', 'Cipla', 'Pharmaceuticals', 'https://www.cipla.com/careers'),
+  ('lupin', 'Lupin', 'Pharmaceuticals', 'https://www.lupin.com/careers'),
+  ('biocon', 'Biocon', 'Biotechnology', 'https://www.biocon.com/careers'),
+  ('asian-paints', 'Asian Paints', 'Manufacturing', 'https://www.asianpaints.com/careers.html'),
+  ('titan-company', 'Titan Company', 'Consumer Goods', 'https://www.titancompany.in/careers/'),
+  ('marico', 'Marico', 'FMCG', 'https://marico.com/india/careers'),
+  ('godrej-group', 'Godrej Group', 'Conglomerate', 'https://www.godrejcareers.com/'),
+  ('dabur', 'Dabur', 'FMCG', 'https://www.dabur.com/careers'),
+  ('tata-consumer-products', 'Tata Consumer Products', 'FMCG', 'https://www.tataconsumer.com/careers')
+on conflict (slug) do update set
+  company_name = excluded.company_name,
+  industry = excluded.industry,
+  career_url = excluded.career_url,
+  is_active = true,
+  updated_at = now();
 
 insert into public.library_topics (name, brief_description, explanation, example)
 values

@@ -58,7 +58,8 @@ let AuthService = class AuthService {
             await this.emailService.sendOtpEmail(normalizedEmail, otp, selectedRole);
         }
         catch (error) {
-            console.log(`OTP for ${normalizedEmail} [${selectedRole}]: ${otp}`);
+            await this.databaseService.deleteOtps(normalizedEmail);
+            throw new common_1.InternalServerErrorException('Unable to send OTP email. Please try again later.');
         }
         return {
             message: 'OTP sent to your email successfully.',
@@ -85,7 +86,7 @@ let AuthService = class AuthService {
         const existingUser = await this.databaseService.getUserByEmail(normalizedEmail);
         const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
         return {
-            accessToken: 'demo-jwt-token-for-job-portal',
+            accessToken: 'demo-jwt-token-for-careernexus-job-portal',
             isNewUser: !existingUser,
             user,
         };

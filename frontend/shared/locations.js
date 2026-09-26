@@ -11,6 +11,7 @@ export const locationSuggestions = [
   'Anand',
   'Asansol',
   'Aurangabad',
+  'Bangalore',
   'Bareilly',
   'Belagavi',
   'Bengaluru',

@@ -4,11 +4,21 @@ export declare class JobsController {
     constructor(jobsService: JobsService);
     getJobs(): Promise<import("../database/database.service").JobRecord[]>;
     getFeaturedJobs(): Promise<import("../database/database.service").JobRecord[]>;
+    getCareerPortals(): Promise<import("../database/database.service").CareerPortalRecord[]>;
     getRecommendations(email: string): Promise<{
+        jobs: any[];
+        updatedAt: string;
+        sourcesConfigured: number;
+        sourcesFailed: any[];
+        diagnostic: string;
+        fetchedCount?: undefined;
+        matchedCount?: undefined;
+        homeMatchCount?: undefined;
+    } | {
         jobs: {
             matchScore: number;
             id: string;
-            source: "Greenhouse" | "Lever";
+            source: string;
             sourceId: string;
             title: string;
             company: string;
@@ -24,6 +34,14 @@ export declare class JobsController {
         }[];
         updatedAt: string;
         sourcesConfigured: number;
+        sourcesFailed: {
+            source: string;
+            message: string;
+        }[];
+        fetchedCount: number;
+        matchedCount: number;
+        homeMatchCount: number;
+        diagnostic: string;
     }>;
     getApplications(email: string): Promise<Record<string, unknown>[]>;
     apply(body: {

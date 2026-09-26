@@ -15,6 +15,11 @@ export class JobsController {
     return this.jobsService.getFeaturedJobs();
   }
 
+  @Get('career-portals')
+  getCareerPortals() {
+    return this.jobsService.getCareerPortals();
+  }
+
   @Get('recommendations')
   getRecommendations(@Query('email') email: string) {
     return this.jobsService.getRecommendations(email);

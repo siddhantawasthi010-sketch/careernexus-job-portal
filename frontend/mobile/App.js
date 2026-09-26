@@ -27,6 +27,9 @@ const ACCOUNT_EMAIL_KEY = 'jobportal_account_email';
 const getSalaryInputValue = (value = '') => value.replace(/^(INR|₹)\s*/i, '');
 
 const getApiBaseUrl = () => {
+  const publicApiUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  if (publicApiUrl) return publicApiUrl.replace(/\/$/, '');
+
   const configuredUrl = Constants.expoConfig?.extra?.apiBaseUrl;
   if (configuredUrl) return configuredUrl.replace(/\/$/, '');
 
@@ -117,6 +120,14 @@ function LoginScreen({ onLogin }) {
       setResendCooldown(30);
       setOtp('');
     } catch (error) {
+      if (!__DEV__) {
+        setError(error.message || 'Unable to send OTP. Please try again later.');
+        return;
+      }
+      if (!__DEV__) {
+        setError(error.message || 'OTP verification failed. Please try again.');
+        return;
+      }
       const fallbackStatus = await AsyncStorage.getItem(STORAGE_KEY);
       const shouldUseFallback = fallbackStatus === 'new-user' || !fallbackStatus;
       setMessage('Backend unavailable. Falling back to local onboarding flow.');
@@ -176,8 +187,9 @@ function LoginScreen({ onLogin }) {
   return (
     <SafeAreaView style={styles.containerDark}>
       <StatusBar barStyle="dark-content" />
-      <View style={styles.loginCard}>
-        <Text style={styles.logoText}>JOB PORTAL</Text>
+      <ScrollView style={styles.loginScroller} contentContainerStyle={styles.loginScroll} keyboardShouldPersistTaps="handled">
+        <View style={styles.loginCard}>
+        <Image source={require('./assets/careernexus-logo.png')} style={styles.loginLogo} resizeMode="contain" accessibilityLabel="CareerNexus, powered by Shivoham Automation Experts" />
         <Text style={styles.title}>Welcome back</Text>
         <Text style={styles.subtitle}>Select your role and receive OTP</Text>
 
@@ -245,7 +257,9 @@ function LoginScreen({ onLogin }) {
         )}
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      </View>
+        <Image source={require('./assets/career-services.png')} style={styles.loginServices} resizeMode="contain" accessibilityLabel="CareerNexus recruitment, talent management, career guidance, AI hiring, corporate hiring, and resume support services" />
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -710,8 +724,8 @@ function ResumeSection({ resume, onUpload, onDownload, onDelete }) {
 function MobileJobCard({ job, isApplied, onApply }) {
   return <View style={styles.jobCard}>
     <View style={styles.jobHeader}>
-      <View style={styles.jobTitleBlock}><Text style={styles.jobTitle}>{job.title}</Text><Text style={styles.jobCompany}>{job.company} · {job.source}</Text></View>
-      <Text style={styles.jobMatchBadge}>{job.matchScore}% match</Text>
+      <View style={styles.jobTitleBlock}><Text style={styles.jobTitle}>{job.title}</Text><Text style={styles.jobCompany}>{job.company}</Text></View>
+      <Text style={styles.jobMatchBadge}>{job.matchScore}% shortlist</Text>
     </View>
     <View style={styles.jobMetaRow}><Text style={styles.jobMeta}>{job.location || 'Location not listed'}</Text><Text style={styles.jobMeta}>{job.type || 'Type not listed'}</Text></View>
     <View style={styles.jobActions}>
@@ -724,27 +738,43 @@ function MobileJobCard({ job, isApplied, onApply }) {
 function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLogout, onUpdateProfilePicture, onUploadResume, onDownloadResume, onDeleteResume, onApplyToJob }) {
   const [activeTab, setActiveTab] = useState('Applied Jobs');
   const [activeNav, setActiveNav] = useState(initialNav);
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
   const [selectedPhoto, setSelectedPhoto] = useState(profile.photo);
   const [recommendations, setRecommendations] = useState([]);
   const [appliedJobs, setAppliedJobs] = useState([]);
+  const [careerPortals, setCareerPortals] = useState([]);
+  const [jobFeedStatus, setJobFeedStatus] = useState(null);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [jobsError, setJobsError] = useState('');
+
+  const handleJobSearchChange = (value) => {
+    setJobSearchQuery(value);
+    if (value.trim() && activeNav !== 'Apply') {
+      setActiveNav('Apply');
+      setActiveTab('Recommended Jobs');
+    }
+  };
 
   useEffect(() => {
     if (!email) return undefined;
     let isActive = true;
     setIsLoadingJobs(true);
     setJobsError('');
+    setJobFeedStatus(null);
     Promise.all([
       fetch(`${getApiBaseUrl()}/jobs/recommendations?email=${encodeURIComponent(email)}`),
       fetch(`${getApiBaseUrl()}/jobs/applications?email=${encodeURIComponent(email)}`),
-    ]).then(async ([recommendationResponse, applicationResponse]) => {
-      const [recommendationData, applicationData] = await Promise.all([recommendationResponse.json(), applicationResponse.json()]);
+      fetch(`${getApiBaseUrl()}/jobs/career-portals`),
+    ]).then(async ([recommendationResponse, applicationResponse, portalResponse]) => {
+      const [recommendationData, applicationData, portalData] = await Promise.all([recommendationResponse.json(), applicationResponse.json(), portalResponse.json()]);
       if (!recommendationResponse.ok) throw new Error(recommendationData.message || 'Unable to load job recommendations.');
       if (!applicationResponse.ok) throw new Error(applicationData.message || 'Unable to load applied jobs.');
+      if (!portalResponse.ok) throw new Error(portalData.message || 'Unable to load company career portals.');
       if (isActive) {
         setRecommendations(Array.isArray(recommendationData.jobs) ? recommendationData.jobs : []);
         setAppliedJobs(Array.isArray(applicationData) ? applicationData : []);
+        setCareerPortals(Array.isArray(portalData) ? portalData : []);
+        setJobFeedStatus({ diagnostic: recommendationData.diagnostic || '', sourcesFailed: Array.isArray(recommendationData.sourcesFailed) ? recommendationData.sourcesFailed : [] });
       }
     }).catch((error) => {
       if (isActive) setJobsError(error.message || 'Unable to load jobs.');
@@ -755,9 +785,17 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
   }, [email]);
 
   const appliedIds = new Set(appliedJobs.map((job) => job.id));
-  const homeJobs = recommendations.filter((job) => job.matchScore >= 50 && !appliedIds.has(job.id));
-  const recommendedJobs = recommendations.filter((job) => job.matchScore >= 70 && !appliedIds.has(job.id));
+  const matchingJobs = recommendations.filter((job) => job.matchScore > 0 && !appliedIds.has(job.id));
+  const homeJobs = matchingJobs;
+  const recommendedJobs = matchingJobs;
   const jobGroups = { 'Applied Jobs': appliedJobs, 'Recommended Jobs': recommendedJobs };
+  const normalizedJobSearch = jobSearchQuery.trim().toLocaleLowerCase();
+  const filteredJobGroups = Object.fromEntries(Object.entries(jobGroups).map(([tab, jobs]) => [
+    tab,
+    normalizedJobSearch ? jobs.filter((job) => [
+      job.title, job.company, job.location, job.type, job.jobType, job.employmentType, job.preferredShift, job.description,
+    ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedJobSearch))) : jobs,
+  ]));
 
   const applyToJob = async (job) => {
     try {
@@ -804,6 +842,11 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
             <Text style={styles.logoutButtonText}>Log out</Text>
           </TouchableOpacity>
         </View>
+        <View style={styles.jobsSearchBox}>
+          <Ionicons name="search-outline" size={18} color="#5b6d7b" />
+          <TextInput value={jobSearchQuery} onChangeText={handleJobSearchChange} placeholder="Search jobs by keyword, company, city, or skill" placeholderTextColor="#74838e" style={styles.jobsSearchInput} returnKeyType="search" accessibilityLabel="Search jobs" />
+          {jobSearchQuery ? <TouchableOpacity onPress={() => setJobSearchQuery('')} accessibilityLabel="Clear job search"><Ionicons name="close-circle" size={18} color="#74838e" /></TouchableOpacity> : null}
+        </View>
 
         {activeNav === 'Profile' && <View style={styles.profileCard}>
           <View style={styles.profileHeroRow}>
@@ -846,11 +889,12 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
 
         {activeNav === 'Home' && <View style={styles.jobsSection}>
           <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Recommended for you</Text><TouchableOpacity onPress={() => setActiveNav('Apply')}><Text style={styles.linkText}>View all</Text></TouchableOpacity></View>
-          <Text style={styles.jobsIntro}>Live career-portal listings with at least a 50% profile match.</Text>
-          {isLoadingJobs && <Text style={styles.libraryStatusText}>Fetching fresh career-portal jobs...</Text>}
+          <Text style={styles.jobsIntro}>All verified listings that match your profile, skills, and preferred location.</Text>
+          {isLoadingJobs && <Text style={styles.libraryStatusText}>Loading matched job listings...</Text>}
           {jobsError ? <Text style={styles.libraryStatusError}>{jobsError}</Text> : null}
-          {!isLoadingJobs && !jobsError && homeJobs.length === 0 ? <Text style={styles.libraryStatusText}>No jobs currently match your profile and preferred cities.</Text> : null}
-          {homeJobs.slice(0, 6).map((job) => <MobileJobCard key={job.id} job={job} onApply={applyToJob} />)}
+          {jobFeedStatus?.sourcesFailed.map((failure) => <Text key={failure.source} style={styles.libraryStatusError}>{failure.source}: {failure.message}</Text>)}
+          {!isLoadingJobs && !jobsError && homeJobs.length === 0 ? <Text style={styles.libraryStatusText}>{jobFeedStatus?.diagnostic || 'No verified job listings are currently available. View all for official employer career portals.'}</Text> : null}
+          {homeJobs.map((job) => <MobileJobCard key={job.id} job={job} onApply={applyToJob} />)}
         </View>}
 
         {activeNav === 'Apply' && <View style={styles.jobsSection}>
@@ -867,11 +911,20 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
             ))}
           </ScrollView>
 
-          <Text style={styles.jobsIntro}>Recommended roles match at least 70% of your profile.</Text>
-          {isLoadingJobs && <Text style={styles.libraryStatusText}>Fetching fresh career-portal jobs...</Text>}
+          <Text style={styles.jobsIntro}>All jobs shown match your profile and preferred location; shortlist scores indicate fit.</Text>
+          {isLoadingJobs && <Text style={styles.libraryStatusText}>Loading matched job listings...</Text>}
           {jobsError ? <Text style={styles.libraryStatusError}>{jobsError}</Text> : null}
-          {!isLoadingJobs && !jobsError && jobGroups[activeTab].length === 0 ? <Text style={styles.libraryStatusText}>{activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : 'No jobs currently meet the 70% recommendation threshold.'}</Text> : null}
-          {!isLoadingJobs && !jobsError && jobGroups[activeTab].map((job) => <MobileJobCard key={job.id} job={job} isApplied={activeTab === 'Applied Jobs'} onApply={applyToJob} />)}
+          {jobFeedStatus?.sourcesFailed.map((failure) => <Text key={failure.source} style={styles.libraryStatusError}>{failure.source}: {failure.message}</Text>)}
+          {!isLoadingJobs && !jobsError && filteredJobGroups[activeTab].length === 0 ? <Text style={styles.libraryStatusText}>{jobGroups[activeTab].length ? `No jobs match “${jobSearchQuery}”.` : activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : jobFeedStatus?.diagnostic || 'No verified job listings are currently available.'}</Text> : null}
+          {!isLoadingJobs && !jobsError && filteredJobGroups[activeTab].map((job) => <MobileJobCard key={job.id} job={job} isApplied={activeTab === 'Applied Jobs'} onApply={applyToJob} />)}
+          <View style={styles.careerPortalSection}>
+            <Text style={styles.portalSectionTitle}>Official career portals</Text>
+            <Text style={styles.jobsIntro}>Browse current vacancies directly on each employer's official site.</Text>
+            {careerPortals.map((portal) => <TouchableOpacity key={portal.slug} style={styles.careerPortalRow} onPress={() => Linking.openURL(portal.careerUrl)} accessibilityRole="link">
+              <View style={styles.careerPortalText}><Text style={styles.careerPortalName}>{portal.companyName}</Text><Text style={styles.careerPortalIndustry}>{portal.industry}</Text></View>
+              <Ionicons name="open-outline" size={18} color="#245c8a" />
+            </TouchableOpacity>)}
+          </View>
         </View>}
 
         {activeNav === 'Profile' && <View style={styles.profileSections}>
@@ -1239,6 +1292,24 @@ const styles = StyleSheet.create({
     maxWidth: 440,
     alignSelf: 'center',
   },
+  loginScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 18,
+  },
+  loginScroller: {
+    width: '100%',
+  },
+  loginLogo: {
+    width: '100%',
+    aspectRatio: 1.78,
+    marginBottom: 18,
+  },
+  loginServices: {
+    width: '100%',
+    aspectRatio: 2.67,
+    marginTop: 20,
+  },
   logoText: {
     color: '#245c8a',
     fontSize: 14,
@@ -1500,7 +1571,7 @@ const styles = StyleSheet.create({
   },
   photoEditIcon: { position: 'absolute', right: 0, bottom: 2, width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   profileScore: {
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
     color: '#33495b',
     backgroundColor: '#edf2f5',
     borderRadius: 5,
@@ -1508,6 +1579,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
     marginBottom: 7,
   },
   profileName: {
@@ -1616,6 +1688,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingRight: 10,
   },
+  jobsSearchBox: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 12, marginBottom: 14, borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 7, backgroundColor: '#fff' },
+  jobsSearchInput: { flex: 1, minWidth: 0, height: 42, paddingVertical: 0, color: '#172b3a', fontSize: 14 },
   tabButton: {
     backgroundColor: '#edf2f5',
     borderRadius: 6,
@@ -1650,6 +1724,12 @@ const styles = StyleSheet.create({
   jobApplyButtonText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   jobAppliedStatus: { color: '#15803d', fontSize: 13, fontWeight: '600' },
   jobsIntro: { color: '#5b6d7b', fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  careerPortalSection: { marginTop: 18, paddingTop: 18, borderTopWidth: 1, borderTopColor: '#d7e0e6' },
+  portalSectionTitle: { color: '#172b3a', fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  careerPortalRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#e4eaee' },
+  careerPortalText: { flex: 1, gap: 3 },
+  careerPortalName: { color: '#172b3a', fontSize: 14, fontWeight: '600' },
+  careerPortalIndustry: { color: '#5b6d7b', fontSize: 12 },
   jobHeader: {
     flexDirection: 'row',
     flexWrap: 'wrap',

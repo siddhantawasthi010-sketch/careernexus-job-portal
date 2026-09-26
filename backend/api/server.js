@@ -10,7 +10,7 @@ app.use(express.json());
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'job-portal-api',
+    service: 'careernexus-job-portal-api',
     message: 'API is running successfully.'
   });
 });

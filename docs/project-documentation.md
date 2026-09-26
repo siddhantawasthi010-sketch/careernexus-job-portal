@@ -1,4 +1,4 @@
-# Job Portal Project Documentation
+# CareerNexus Job Portal Project Documentation
 
 ## 1. Introduction
 
@@ -39,7 +39,7 @@ The product is intentionally modular so it can be extended with:
 ## 3. Project Structure Overview
 
 ```text
-job-portal/
+careernexus-job-portal/
 ├── backend/
 │   └── api/
 │       ├── src/
@@ -261,7 +261,7 @@ Example response:
 
 ```json
 {
-  "accessToken": "demo-jwt-token-for-job-portal",
+  "accessToken": "demo-jwt-token-for-careernexus-job-portal",
   "user": {
     "id": 1,
     "name": "Recruiter User",

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { EmailService } from '../email/email.service';
 import { DatabaseService, UserRole } from '../database/database.service';
@@ -58,7 +58,8 @@ export class AuthService {
     try {
       await this.emailService.sendOtpEmail(normalizedEmail, otp, selectedRole);
     } catch (error) {
-      console.log(`OTP for ${normalizedEmail} [${selectedRole}]: ${otp}`);
+      await this.databaseService.deleteOtps(normalizedEmail);
+      throw new InternalServerErrorException('Unable to send OTP email. Please try again later.');
     }
 
     return {
@@ -92,7 +93,7 @@ export class AuthService {
     const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
 
     return {
-      accessToken: 'demo-jwt-token-for-job-portal',
+      accessToken: 'demo-jwt-token-for-careernexus-job-portal',
       isNewUser: !existingUser,
       user,
     };

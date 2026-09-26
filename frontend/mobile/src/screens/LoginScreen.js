@@ -92,7 +92,7 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <View style={styles.wrapper}>
-      <Text style={styles.logo}>JOB PORTAL</Text>
+      <Text style={styles.logo}>CareerNexus</Text>
       <Text style={styles.title}>Welcome back</Text>
       <Text style={styles.subtitle}>Select your role and receive OTP</Text>
 

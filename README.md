@@ -1,11 +1,11 @@
-# Job Portal
+# CareerNexus Job Portal
 
 A hybrid job portal project with a web frontend, mobile frontend, and backend API.
 
 ## Project structure
 
 ```text
-job-portal/
+careernexus-job-portal/
 ├── frontend/
 │   ├── web/
 │   └── mobile/
@@ -59,5 +59,9 @@ Run [`backend/api/supabase.sql`](backend/api/supabase.sql) in the Supabase SQL E
 ### API health check
 
 ```bash
-http://localhost:5000/api/health
+http://localhost:5000/health
 ```
+
+## Public deployment and Android APK
+
+See the [deployment guide](docs/deployment-guide.md) for Supabase, API and web hosting, production environment variables, and building an Android APK with Expo EAS. The guide also describes a current authentication security issue that must be fixed before using real users' data.

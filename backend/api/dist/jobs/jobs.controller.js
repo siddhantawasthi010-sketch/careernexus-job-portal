@@ -25,6 +25,9 @@ let JobsController = class JobsController {
     getFeaturedJobs() {
         return this.jobsService.getFeaturedJobs();
     }
+    getCareerPortals() {
+        return this.jobsService.getCareerPortals();
+    }
     getRecommendations(email) {
         return this.jobsService.getRecommendations(email);
     }
@@ -48,6 +51,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], JobsController.prototype, "getFeaturedJobs", null);
+__decorate([
+    (0, common_1.Get)('career-portals'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], JobsController.prototype, "getCareerPortals", null);
 __decorate([
     (0, common_1.Get)('recommendations'),
     __param(0, (0, common_1.Query)('email')),

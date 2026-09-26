@@ -12,7 +12,7 @@ let AppService = class AppService {
     getHealth() {
         return {
             status: 'ok',
-            service: 'job-portal-api',
+            service: 'careernexus-job-portal-api',
             message: 'API is running successfully.',
         };
     }

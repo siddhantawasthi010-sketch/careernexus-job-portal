@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { ChevronDown, ChevronUp, Download, FileText, GraduationCap, Home, Library, Pencil, Plus, Send, Trash2, Upload, User } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, ChevronUp, Download, FileText, GraduationCap, Home, Library, Pencil, Plus, Search, Send, Trash2, Upload, User } from 'lucide-react';
 import { locationSuggestions } from '../../shared/locations';
 import { calculateProfileCompletion, formatProfileUpdatedAt, languageSuggestions, noticePeriodOptions } from '../../shared/profile';
 import './styles.css';
@@ -43,7 +43,7 @@ const navigationItems = [
 ];
 const STORAGE_KEY = 'jobportal_user_profile_status';
 const ACCOUNT_EMAIL_KEY = 'jobportal_account_email';
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 
 const getSalaryInputValue = (value = '') => value.replace(/^(INR|₹)\s*/i, '');
 const displayValue = (value) => Array.isArray(value) ? value.join(', ') || 'Not added' : value || 'Not added';
@@ -138,7 +138,7 @@ function LoginScreen({ onLogin }) {
     setLoadingOtp(true);
 
     try {
-      const response = await fetch('http://localhost:5000/auth/send-otp', {
+      const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, role }),
@@ -152,6 +152,10 @@ function LoginScreen({ onLogin }) {
       setResendCooldown(30);
       setOtp('');
     } catch (err) {
+      if (import.meta.env.PROD) {
+        setError(err.message || 'Unable to send OTP. Please try again later.');
+        return;
+      }
       const fallbackStatus = localStorage.getItem(STORAGE_KEY);
       const shouldUseFallback = fallbackStatus === 'new-user' || !fallbackStatus;
       localStorage.setItem(STORAGE_KEY, shouldUseFallback ? 'new-user' : 'existing-user');
@@ -183,7 +187,7 @@ function LoginScreen({ onLogin }) {
     setSuccessMessage('');
 
     try {
-      const response = await fetch('http://localhost:5000/auth/verify-otp', {
+      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp }),
@@ -199,6 +203,10 @@ function LoginScreen({ onLogin }) {
         isFirstTime,
       });
     } catch (err) {
+      if (import.meta.env.PROD) {
+        setError(err.message || 'OTP verification failed. Please try again.');
+        return;
+      }
       const storedStatus = localStorage.getItem(STORAGE_KEY);
       const fallbackIsFirstTime = storedStatus === 'new-user' || !storedStatus;
       localStorage.setItem(STORAGE_KEY, fallbackIsFirstTime ? 'new-user' : 'existing-user');
@@ -215,7 +223,7 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <p className="eyebrow">JOB PORTAL</p>
+        <img className="auth-logo" src="/images/careernexus-logo.png" alt="CareerNexus, powered by Shivoham Automation Experts" />
         <h1>Welcome back</h1>
         <p className="muted">Select your role and receive OTP</p>
 
@@ -250,6 +258,7 @@ function LoginScreen({ onLogin }) {
 
           {error && <p className="error">{error}</p>}
         </form>
+        <img className="auth-services" src="/images/career-services.png" alt="CareerNexus recruitment, talent management, career guidance, AI hiring, corporate hiring, and resume support services" />
       </div>
     </div>
   );
@@ -433,7 +442,7 @@ function JobListingCard({ job, onApply, isApplied = false, compact = false }) {
   };
 
   return <article className={compact ? 'job-card live-job-card compact' : 'job-card live-job-card'}>
-    <div className="job-head"><div><h4>{job.title}</h4><p>{job.company} · {job.source}</p></div><span className="badge">{job.matchScore}% match</span></div>
+    <div className="job-head"><div><h4>{job.title}</h4><p>{job.company}</p></div><span className="badge">{job.matchScore}% shortlist score</span></div>
     <div className="job-meta-row"><span>{job.location || 'Location not listed'}</span><span>{job.type || 'Type not listed'}</span></div>
     <div className="job-card-actions"><a href={job.url} target="_blank" rel="noreferrer">View listing</a>{isApplied ? <span className="applied-status">Applied</span> : <button type="button" className="job-apply-button" disabled={isApplying} onClick={apply}>{isApplying ? 'Saving…' : 'Apply'}</button>}</div>
     {error && <p className="job-apply-error" role="alert">{error}</p>}
@@ -650,10 +659,21 @@ function CoursesView() {
 function LandingDashboard({ profile, email, initialNav, onEditProfileSection, onLogout, onUpdateProfilePicture, onUploadResume, onDownloadResume, onDeleteResume }) {
   const [activeTab, setActiveTab] = useState('Applied Jobs');
   const [activeNav, setActiveNav] = useState(initialNav);
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
   const [recommendations, setRecommendations] = useState([]);
   const [appliedJobs, setAppliedJobs] = useState([]);
+  const [careerPortals, setCareerPortals] = useState([]);
+  const [jobFeedStatus, setJobFeedStatus] = useState(null);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [jobsError, setJobsError] = useState('');
+
+  const handleJobSearchChange = (value) => {
+    setJobSearchQuery(value);
+    if (value.trim() && activeNav !== 'Apply') {
+      setActiveNav('Apply');
+      setActiveTab('Recommended Jobs');
+    }
+  };
 
   const handlePhotoChange = (event) => {
     const file = event.target.files?.[0];
@@ -672,16 +692,21 @@ function LandingDashboard({ profile, email, initialNav, onEditProfileSection, on
     let isActive = true;
     setIsLoadingJobs(true);
     setJobsError('');
+    setJobFeedStatus(null);
     Promise.all([
       fetch(`${API_BASE_URL}/jobs/recommendations?email=${encodeURIComponent(email)}`),
       fetch(`${API_BASE_URL}/jobs/applications?email=${encodeURIComponent(email)}`),
-    ]).then(async ([recommendationResponse, applicationResponse]) => {
-      const [recommendationData, applicationData] = await Promise.all([recommendationResponse.json(), applicationResponse.json()]);
+      fetch(`${API_BASE_URL}/jobs/career-portals`),
+    ]).then(async ([recommendationResponse, applicationResponse, portalResponse]) => {
+      const [recommendationData, applicationData, portalData] = await Promise.all([recommendationResponse.json(), applicationResponse.json(), portalResponse.json()]);
       if (!recommendationResponse.ok) throw new Error(recommendationData.message || 'Unable to load job recommendations.');
       if (!applicationResponse.ok) throw new Error(applicationData.message || 'Unable to load applied jobs.');
+      if (!portalResponse.ok) throw new Error(portalData.message || 'Unable to load company career portals.');
       if (isActive) {
         setRecommendations(Array.isArray(recommendationData.jobs) ? recommendationData.jobs : []);
         setAppliedJobs(Array.isArray(applicationData) ? applicationData : []);
+        setCareerPortals(Array.isArray(portalData) ? portalData : []);
+        setJobFeedStatus({ diagnostic: recommendationData.diagnostic || '', sourcesFailed: Array.isArray(recommendationData.sourcesFailed) ? recommendationData.sourcesFailed : [] });
       }
     }).catch((error) => {
       if (isActive) setJobsError(error.message || 'Unable to load jobs.');
@@ -692,9 +717,17 @@ function LandingDashboard({ profile, email, initialNav, onEditProfileSection, on
   }, [email]);
 
   const appliedIds = new Set(appliedJobs.map((job) => job.id));
-  const homeJobs = recommendations.filter((job) => job.matchScore >= 50 && !appliedIds.has(job.id));
-  const recommendedJobs = recommendations.filter((job) => job.matchScore >= 70 && !appliedIds.has(job.id));
+  const matchingJobs = recommendations.filter((job) => job.matchScore > 0 && !appliedIds.has(job.id));
+  const homeJobs = matchingJobs;
+  const recommendedJobs = matchingJobs;
   const jobsByTab = { 'Applied Jobs': appliedJobs, 'Recommended Jobs': recommendedJobs };
+  const normalizedJobSearch = jobSearchQuery.trim().toLocaleLowerCase();
+  const filteredJobsByTab = Object.fromEntries(Object.entries(jobsByTab).map(([tab, jobs]) => [
+    tab,
+    normalizedJobSearch ? jobs.filter((job) => [
+      job.title, job.company, job.location, job.type, job.jobType, job.employmentType, job.preferredShift, job.description,
+    ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedJobSearch))) : jobs,
+  ]));
 
   const applyToJob = async (job) => {
     const response = await fetch(`${API_BASE_URL}/jobs/applications`, {
@@ -738,6 +771,11 @@ function LandingDashboard({ profile, email, initialNav, onEditProfileSection, on
       </header>
 
       <main className="dashboard-shell">
+        <div className="jobs-search-box dashboard-jobs-search" role="search">
+          <Search size={18} aria-hidden="true" />
+          <input type="search" aria-label="Search jobs" placeholder="Search jobs by keyword, company, city, or skill" value={jobSearchQuery} onChange={(event) => handleJobSearchChange(event.target.value)} />
+        </div>
+
         {activeNav === 'Profile' && <section className="profile-section panel">
           <div className="profile-summary">
             <div className="profile-identity">
@@ -773,16 +811,17 @@ function LandingDashboard({ profile, email, initialNav, onEditProfileSection, on
         </section>}
 
         {activeNav === 'Home' && <section className="jobs-section panel">
-          <div className="jobs-header"><div><h3>Recommended for you</h3><p className="jobs-section-intro">Live career-portal listings with at least a 50% profile match.</p></div><button type="button" className="link-button" onClick={() => setActiveNav('Apply')}>View all</button></div>
-          {isLoadingJobs && <p className="library-status">Fetching fresh career-portal jobs...</p>}
+          <div className="jobs-header"><div><h3>Recommended for you</h3><p className="jobs-section-intro">All verified listings that match your profile, skills, and preferred location.</p></div><button type="button" className="link-button" onClick={() => setActiveNav('Apply')}>View all</button></div>
+          {isLoadingJobs && <p className="library-status">Loading matched job listings...</p>}
           {jobsError && <p className="library-status error">{jobsError}</p>}
-          {!isLoadingJobs && !jobsError && homeJobs.length === 0 && <p className="library-status">No jobs currently match your profile and preferred cities.</p>}
-          <div className="job-list-grid">{homeJobs.slice(0, 6).map((job) => <JobListingCard key={job.id} job={job} onApply={applyToJob} compact />)}</div>
+          {jobFeedStatus?.sourcesFailed.map((failure) => <p className="library-status error" key={failure.source}>{failure.source}: {failure.message}</p>)}
+          {!isLoadingJobs && !jobsError && homeJobs.length === 0 && <p className="library-status">{jobFeedStatus?.diagnostic || 'No verified job listings are currently available. View all for official employer career portals.'}</p>}
+          <div className="job-list-grid">{homeJobs.map((job) => <JobListingCard key={job.id} job={job} onApply={applyToJob} compact />)}</div>
         </section>}
 
         {activeNav === 'Apply' && <section className="jobs-section panel">
           <div className="jobs-header">
-            <div><h3>Jobs</h3><p className="jobs-section-intro">Recommendations are ranked by profile match and preferred location.</p></div>
+            <div><h3>Jobs</h3><p className="jobs-section-intro">All jobs shown match your profile and preferred location; shortlist scores indicate fit.</p></div>
           </div>
 
           <div className="tab-row">
@@ -798,10 +837,15 @@ function LandingDashboard({ profile, email, initialNav, onEditProfileSection, on
             ))}
           </div>
 
-          {isLoadingJobs && <p className="library-status">Fetching fresh career-portal jobs...</p>}
+          {isLoadingJobs && <p className="library-status">Loading matched job listings...</p>}
           {jobsError && <p className="library-status error">{jobsError}</p>}
-          {!isLoadingJobs && !jobsError && jobsByTab[activeTab].length === 0 && <p className="library-status">{activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : 'No jobs currently meet the 70% recommendation threshold.'}</p>}
-          {!isLoadingJobs && !jobsError && <div className="job-list-grid">{jobsByTab[activeTab].map((job) => <JobListingCard key={job.id} job={job} onApply={applyToJob} isApplied={activeTab === 'Applied Jobs'} />)}</div>}
+          {jobFeedStatus?.sourcesFailed.map((failure) => <p className="library-status error" key={failure.source}>{failure.source}: {failure.message}</p>)}
+          {!isLoadingJobs && !jobsError && filteredJobsByTab[activeTab].length === 0 && <p className="library-status">{jobsByTab[activeTab].length ? `No jobs match “${jobSearchQuery}”.` : activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : jobFeedStatus?.diagnostic || 'No verified job listings are currently available.'}</p>}
+          {!isLoadingJobs && !jobsError && <div className="job-list-grid">{filteredJobsByTab[activeTab].map((job) => <JobListingCard key={job.id} job={job} onApply={applyToJob} isApplied={activeTab === 'Applied Jobs'} />)}</div>}
+          <section className="career-portals-section">
+            <div className="jobs-header"><div><h3>Official career portals</h3><p className="jobs-section-intro">Browse current vacancies directly on each employer's official site.</p></div></div>
+            <div className="career-portal-grid">{careerPortals.map((portal) => <a className="career-portal-link" key={portal.slug} href={portal.careerUrl} target="_blank" rel="noreferrer"><span><strong>{portal.companyName}</strong><small>{portal.industry}</small></span><ArrowUpRight size={17} aria-hidden="true" /></a>)}</div>
+          </section>
         </section>}
 
         {activeNav === 'Profile' && <div className="profile-sections">

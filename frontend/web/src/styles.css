@@ -94,6 +94,17 @@ textarea { min-height: 96px; resize: vertical; }
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
+.auth-logo,
+.auth-services {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.auth-logo { margin: 0 auto 18px; }
+.auth-services { margin-top: 20px; }
+
 .eyebrow {
   margin: 0 0 8px;
   color: #245c8a;
@@ -300,6 +311,7 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
 
 .profile-score {
   display: inline-flex;
+  align-self: center;
   align-items: center;
   justify-content: center;
   gap: 7px;
@@ -427,6 +439,12 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
   color: white;
 }
 
+.jobs-search-box { display: flex; align-items: center; gap: 10px; width: min(100%, 520px); min-height: 42px; margin: 0 0 18px; padding: 0 12px; border: 1px solid #cbd6dd; border-radius: 7px; background: #fff; color: #5b6d7b; }
+.jobs-search-box:focus-within { border-color: #4c85af; box-shadow: 0 0 0 2px rgba(36, 92, 138, 0.12); }
+.jobs-search-box input { width: 100%; min-width: 0; height: 40px; padding: 0; border: 0; outline: 0; background: transparent; color: #172b3a; box-shadow: none; }
+.jobs-search-box input:focus { border: 0; outline: 0; box-shadow: none; }
+.dashboard-jobs-search { margin: 0 0 18px; }
+
 .job-list-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -453,6 +471,14 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
 .applied-status { color: #15803d; font-size: 0.82rem; font-weight: 600; }
 .job-apply-error { margin: 9px 0 0; color: #b42318; font-size: 0.8rem; }
 .jobs-section-intro { margin: -5px 0 0; color: #5b6d7b; font-size: 0.82rem; }
+.career-portals-section { margin-top: 28px; border-top: 1px solid #d7e0e6; padding-top: 22px; }
+.career-portal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 18px; }
+.career-portal-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 12px 2px; border-bottom: 1px solid #e4eaee; color: #172b3a; text-decoration: none; }
+.career-portal-link span:first-child { display: grid; gap: 3px; min-width: 0; }
+.career-portal-link strong { font-size: 0.88rem; overflow-wrap: anywhere; }
+.career-portal-link small { color: #5b6d7b; font-size: 0.76rem; }
+.career-portal-link > span:last-child { color: #245c8a; font-size: 1.1rem; }
+.career-portal-link:hover strong { text-decoration: underline; }
 
 .job-head {
   display: flex;

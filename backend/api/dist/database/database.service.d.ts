@@ -22,6 +22,29 @@ export interface JobRecord {
     salary: string | null;
     featured: boolean;
 }
+export interface CareerPortalRecord {
+    slug: string;
+    companyName: string;
+    industry: string;
+    careerUrl: string;
+}
+export interface FeedJobRecord {
+    id: string;
+    source: string;
+    sourceId: string;
+    title: string;
+    company: string;
+    location: string;
+    type: string;
+    jobType: string | null;
+    employmentType: string | null;
+    preferredShift: string | null;
+    description: string;
+    salary: string | null;
+    url: string;
+    postedAt: string | null;
+    matchScore: number;
+}
 export interface LibraryTopicRecord {
     id: number;
     name: string;
@@ -79,6 +102,9 @@ export declare class DatabaseService {
     }): Promise<void>;
     deleteOtps(email: string): Promise<void>;
     getJobs(featured?: boolean): Promise<JobRecord[]>;
+    getCareerPortals(): Promise<CareerPortalRecord[]>;
+    saveFeedJobs(jobs: FeedJobRecord[]): Promise<void>;
+    getRecentFeedJobs(): Promise<FeedJobRecord[]>;
     getUserJobApplications(email: string): Promise<Record<string, unknown>[]>;
     applyUserToJob(email: string, job: Record<string, unknown>): Promise<{
         id: string;

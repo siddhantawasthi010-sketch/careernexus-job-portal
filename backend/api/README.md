@@ -1,6 +1,6 @@
-# Job Portal API
+# CareerNexus Job Portal API
 
-This NestJS backend provides the API layer for the Job Portal project.
+This NestJS backend provides the API layer for the CareerNexus Job Portal project.
 
 ## Scripts
 
@@ -22,7 +22,7 @@ alter table public.users
 add column if not exists profile jsonb not null default '{}'::jsonb;
 ```
 
-For an existing database, rerun the current [`supabase.sql`](supabase.sql) in the SQL Editor to create the employment/project tables, `user_job_applications`, and private `user-resumes` storage bucket. Profile fields, skills, and resume metadata are stored in `users.profile`; resume file contents are stored in the private bucket.
+For an existing database, rerun the current [`supabase.sql`](supabase.sql) in the SQL Editor to create the employment/project tables, `user_job_applications`, `career_portals`, `job_feed_items`, and private `user-resumes` storage bucket. Profile fields, skills, and resume metadata are stored in `users.profile`; resume file contents are stored in the private bucket.
 
 The service-role key is backend-only. Do not put it in either frontend application or commit it to source control.
 
@@ -31,7 +31,8 @@ The service-role key is backend-only. Do not put it in either frontend applicati
 - `GET /health` → health check
 - `GET /jobs` → list jobs
 - `GET /jobs/featured` → list featured jobs
-- `GET /jobs/recommendations?email=...` → fetch live career-portal listings and score them against the signed-in profile
+- `GET /jobs/career-portals` → list official employer career portals
+- `GET /jobs/recommendations?email=...` → return profile-matched job listings
 - `GET /jobs/applications?email=...` → list jobs the candidate has applied to
 - `POST /jobs/applications` → save a candidate's Apply action and job snapshot
 - `GET /library/topics` → list active Library topics ordered alphabetically
@@ -44,11 +45,13 @@ The service-role key is backend-only. Do not put it in either frontend applicati
 - `GET /auth/profile/resume?email=...` → create a short-lived signed download link
 - `DELETE /auth/profile/resume` → remove the uploaded resume
 
-## Live job sources
+## Job feed integrations
 
-The recommendations endpoint fetches public Greenhouse boards on each request. By default it queries the verified boards `figma`, `cloudflare`, `datadog`, `duolingo`, `robinhood`, `anthropic`, `stripe`, `asana`, and `mongodb`. Override them with the comma-separated `GREENHOUSE_BOARD_SLUGS` environment variable. Optional Lever postings can be added through `LEVER_COMPANY_SITES`; each value must be the company's Lever site identifier. No portal API keys are used for these public feeds.
+Configure provider credentials in the backend `.env` file. Adzuna requires `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`; Jooble requires `JOOBLE_API_KEY`; RapidAPI JSearch requires `RAPIDAPI_KEY`. Greenhouse board slugs go in `GREENHOUSE_BOARD_SLUGS`, Lever site identifiers go in `LEVER_COMPANY_SITES`, and Workday tenant/site configurations go in `WORKDAY_TENANTS` as a JSON array. These ATS identifiers are separate from career portal URLs. Providers without configuration are skipped; source failures are isolated and returned in `sourcesFailed`.
 
-Recommendations require a profile headline or preferred job role and at least one preferred city. Home displays matches at 50% or higher; Apply → Recommended displays matches at 70% or higher. A click on Apply is saved locally in `user_job_applications` before opening the employer's listing. It records the handoff, not completion of the external application form.
+`/jobs/recommendations` searches using the signed-in profile's preferred role, headline, skills, and cities. Results from all configured providers are normalized and deduplicated into `job_feed_items`, then filtered and ranked against preferred city, role, professional summary, skills, notice period (when a job explicitly states availability), and available job-type/shift data. Each result includes a `matchScore` percentage used as the shortlist score. Recent stored listings are used as a fallback when all live provider requests fail. Home displays matches at 50% or higher; Apply → Recommended displays matches at 70% or higher.
+
+The `career_portals` table contains the 34 official employer links supplied for this project. Career pages are shown separately from job postings because they do not all provide public job-feed APIs. A click on Apply is saved in `user_job_applications` before opening the employer's listing; it records the handoff, not completion of the external application form.
 
 ## Port
 

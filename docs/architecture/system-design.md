@@ -1,4 +1,4 @@
-# Job Portal System Design
+# CareerNexus Job Portal System Design
 
 ## 1. Architecture
 

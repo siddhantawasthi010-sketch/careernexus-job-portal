@@ -105,10 +105,10 @@ let EmailService = EmailService_1 = class EmailService {
         const mailOptions = {
             from,
             to: email,
-            subject: `Your Job Portal OTP for ${role} login`,
+            subject: `Your CareerNexus OTP for ${role} login`,
             html: `
         <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f8fafc;">
-          <h2 style="margin-bottom: 12px; color: #0f172a;">Job Portal OTP</h2>
+          <h2 style="margin-bottom: 12px; color: #0f172a;">CareerNexus OTP</h2>
           <p style="font-size: 16px; color: #334155; margin: 0 0 18px;">
             Your one-time password for ${role} login is:
           </p>
