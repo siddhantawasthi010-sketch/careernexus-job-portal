@@ -78,7 +78,6 @@ let EmailService = EmailService_1 = class EmailService {
             return null;
         }
         return nodemailer.createTransport({
-            service: 'gmail',
             host,
             port,
             secure,

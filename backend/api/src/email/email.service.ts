@@ -42,7 +42,6 @@ export class EmailService {
     }
 
     return nodemailer.createTransport({
-      service: 'gmail',
       host,
       port,
       secure,
