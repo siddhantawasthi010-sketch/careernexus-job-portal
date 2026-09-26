@@ -1,9 +1,11 @@
 import { NestFactory } from '@nestjs/core';
+import { setDefaultResultOrder } from 'node:dns';
 import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
 
 // Use the project's .env values when a parent shell has stale SMTP variables.
 dotenv.config({ override: true });
+setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
