@@ -34,9 +34,11 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const core_1 = require("@nestjs/core");
+const node_dns_1 = require("node:dns");
 const app_module_1 = require("./app.module");
 const dotenv = __importStar(require("dotenv"));
 dotenv.config({ override: true });
+(0, node_dns_1.setDefaultResultOrder)('ipv4first');
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
     const corsOrigins = (process.env.CORS_ORIGINS || '')
