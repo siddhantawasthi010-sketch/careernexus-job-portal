@@ -23,6 +23,28 @@ export declare class AuthService {
     updateProfile(email: string, profile: Record<string, unknown>): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;
+    updateProfilePhoto(email: string, photo: string): Promise<{
+        user: import("../database/database.service").StoredUser;
+    }>;
+    uploadResume(email: string, file: {
+        originalname: string;
+        mimetype: string;
+        size: number;
+        buffer: Buffer;
+    }): Promise<{
+        resume: any;
+        downloadUrl: string;
+        updated_at: any;
+    }>;
+    getResume(email: string): Promise<{
+        resume: {
+            storagePath?: string;
+        };
+        downloadUrl: string;
+    }>;
+    deleteResume(email: string): Promise<{
+        updated_at: any;
+    }>;
     resendOtp(email: string, role?: string): Promise<{
         message: string;
         email: string;

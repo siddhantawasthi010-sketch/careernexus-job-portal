@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { EmailService } from '../email/email.service';
 import { DatabaseService, UserRole } from '../database/database.service';
@@ -106,6 +106,35 @@ export class AuthService {
 
     const user = await this.databaseService.updateUserProfile(normalizedEmail, profile);
     return { user };
+  }
+
+  async updateProfilePhoto(email: string, photo: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || typeof photo !== 'string' || !photo) {
+      throw new UnauthorizedException('A valid email and profile photo are required.');
+    }
+    const user = await this.databaseService.updateUserProfilePhoto(normalizedEmail, photo);
+    return { user };
+  }
+
+  async uploadResume(email: string, file: { originalname: string; mimetype: string; size: number; buffer: Buffer }) {
+    if (!email?.trim()) throw new BadRequestException('A valid email is required.');
+    try {
+      return await this.databaseService.uploadUserResume(email, file);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Resume')) throw new BadRequestException(error.message);
+      throw error;
+    }
+  }
+
+  async getResume(email: string) {
+    if (!email?.trim()) throw new BadRequestException('A valid email is required.');
+    return (await this.databaseService.getUserResume(email)) || { resume: null, downloadUrl: null };
+  }
+
+  async deleteResume(email: string) {
+    if (!email?.trim()) throw new BadRequestException('A valid email is required.');
+    return this.databaseService.deleteUserResume(email);
   }
 
   async resendOtp(email: string, role?: string) {

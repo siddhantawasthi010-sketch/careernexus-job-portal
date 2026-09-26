@@ -9,6 +9,30 @@ export interface StoredUser {
   email: string;
   role: UserRole;
   profile: Record<string, unknown>;
+  updated_at: string;
+}
+
+interface EmploymentProfileEntry {
+  isCurrent?: boolean;
+  employmentType?: string;
+  companyName?: string;
+  jobTitle?: string;
+  joiningDate?: string;
+  relievingDate?: string;
+  ctc?: string;
+  skills?: string[];
+  jobProfile?: string;
+  noticePeriod?: string;
+}
+
+interface MajorProjectProfileEntry {
+  projectTitle?: string;
+  companyName?: string;
+  clientName?: string;
+  status?: string;
+  workedFrom?: string;
+  workedTill?: string;
+  projectDetails?: string;
 }
 
 export interface StoredOtp {
@@ -46,6 +70,12 @@ export interface CourseRecord {
   url: string;
 }
 
+const toSqlDate = (value?: string) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : null;
+};
+
 @Injectable()
 export class DatabaseService {
   private readonly client: SupabaseClient;
@@ -64,18 +94,54 @@ export class DatabaseService {
   }
 
   async getUserByEmail(email: string): Promise<StoredUser | null> {
-    const { data, error } = await this.client.from('users').select('id, name, email, role, profile').eq('email', email).maybeSingle();
+    const { data, error } = await this.client.from('users').select('id, name, email, role, profile, updated_at').eq('email', email).maybeSingle();
     if (error) {
       throw new Error(`Unable to load user: ${error.message}`);
     }
-    return data as StoredUser | null;
+    if (!data) return null;
+
+    const [employmentResult, projectsResult] = await Promise.all([
+      this.client.from('user_employment_details').select('is_current, employment_type, company_name, job_title, joining_date, relieving_date, ctc, skills, job_profile, notice_period').eq('user_id', data.id).order('created_at', { ascending: true }),
+      this.client.from('user_major_projects').select('project_title, company_name, client_name, status, worked_from, worked_till, project_details').eq('user_id', data.id).order('created_at', { ascending: true }),
+    ]);
+
+    if (employmentResult.error) throw new Error(`Unable to load employment details: ${employmentResult.error.message}`);
+    if (projectsResult.error) throw new Error(`Unable to load major projects: ${projectsResult.error.message}`);
+
+    return {
+      ...data,
+      profile: {
+        ...(data.profile || {}),
+        employmentDetails: (employmentResult.data || []).map((row) => ({
+          isCurrent: row.is_current,
+          employmentType: row.employment_type,
+          companyName: row.company_name,
+          jobTitle: row.job_title,
+          joiningDate: row.joining_date,
+          relievingDate: row.relieving_date,
+          ctc: row.ctc,
+          skills: row.skills,
+          jobProfile: row.job_profile,
+          noticePeriod: row.notice_period,
+        })),
+        majorProjects: (projectsResult.data || []).map((row) => ({
+          projectTitle: row.project_title,
+          companyName: row.company_name,
+          clientName: row.client_name,
+          status: row.status,
+          workedFrom: row.worked_from,
+          workedTill: row.worked_till,
+          projectDetails: row.project_details,
+        })),
+      },
+    } as StoredUser;
   }
 
   async upsertUser(user: { email: string; name: string; role: UserRole }): Promise<StoredUser> {
     const { data, error } = await this.client
       .from('users')
       .upsert(user, { onConflict: 'email' })
-      .select('id, name, email, role, profile')
+      .select('id, name, email, role, profile, updated_at')
       .single();
 
     if (error) {
@@ -86,18 +152,168 @@ export class DatabaseService {
 
   async updateUserProfile(email: string, profile: Record<string, unknown>): Promise<StoredUser> {
     const name = typeof profile.name === 'string' && profile.name.trim() ? profile.name.trim() : undefined;
-    const update = name ? { name, profile } : { profile };
+    const update = name ? { name, profile, updated_at: new Date().toISOString() } : { profile, updated_at: new Date().toISOString() };
     const { data, error } = await this.client
       .from('users')
       .update(update)
       .eq('email', email)
-      .select('id, name, email, role, profile')
+      .select('id, name, email, role, profile, updated_at')
       .single();
 
     if (error) {
       throw new Error(`Unable to update user profile: ${error.message}`);
     }
+
+    const userId = data.id;
+    const employmentDetails = Array.isArray(profile.employmentDetails) ? profile.employmentDetails as EmploymentProfileEntry[] : [];
+    const majorProjects = Array.isArray(profile.majorProjects) ? profile.majorProjects as MajorProjectProfileEntry[] : [];
+    const employmentRows = employmentDetails.filter((entry) => entry.companyName?.trim() && entry.jobTitle?.trim()).map((entry) => ({
+      user_id: userId,
+      is_current: Boolean(entry.isCurrent),
+      employment_type: ['Full Time', 'Part Time'].includes(entry.employmentType || '') ? entry.employmentType : null,
+      company_name: entry.companyName.trim(),
+      job_title: entry.jobTitle.trim(),
+      joining_date: toSqlDate(entry.joiningDate),
+      relieving_date: entry.isCurrent ? null : toSqlDate(entry.relievingDate),
+      ctc: entry.ctc || null,
+      skills: Array.isArray(entry.skills) ? entry.skills : [],
+      job_profile: entry.jobProfile || null,
+      notice_period: entry.isCurrent ? entry.noticePeriod || null : null,
+    }));
+    const projectRows = majorProjects.filter((entry) => entry.projectTitle?.trim()).map((entry) => ({
+      user_id: userId,
+      project_title: entry.projectTitle.trim(),
+      company_name: entry.companyName || null,
+      client_name: entry.clientName || null,
+      status: ['In progress', 'Finished'].includes(entry.status || '') ? entry.status : null,
+      worked_from: toSqlDate(entry.workedFrom),
+      worked_till: toSqlDate(entry.workedTill),
+      project_details: entry.projectDetails || null,
+    }));
+
+    const [employmentDelete, projectsDelete] = await Promise.all([
+      this.client.from('user_employment_details').delete().eq('user_id', userId),
+      this.client.from('user_major_projects').delete().eq('user_id', userId),
+    ]);
+    if (employmentDelete.error) throw new Error(`Unable to replace employment details: ${employmentDelete.error.message}`);
+    if (projectsDelete.error) throw new Error(`Unable to replace major projects: ${projectsDelete.error.message}`);
+
+    const [employmentInsert, projectsInsert] = await Promise.all([
+      employmentRows.length ? this.client.from('user_employment_details').insert(employmentRows) : Promise.resolve({ error: null }),
+      projectRows.length ? this.client.from('user_major_projects').insert(projectRows) : Promise.resolve({ error: null }),
+    ]);
+    if (employmentInsert.error) throw new Error(`Unable to save employment details: ${employmentInsert.error.message}`);
+    if (projectsInsert.error) throw new Error(`Unable to save major projects: ${projectsInsert.error.message}`);
+
     return data as StoredUser;
+  }
+
+  async updateUserProfilePhoto(email: string, photo: string): Promise<StoredUser> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data: user, error: loadError } = await this.client
+      .from('users')
+      .select('id, name, email, role, profile')
+      .eq('email', normalizedEmail)
+      .single();
+    if (loadError) throw new Error(`Unable to load profile before photo update: ${loadError.message}`);
+
+    const profile = { ...(user.profile || {}), photo };
+    const { data, error } = await this.client
+      .from('users')
+      .update({ profile, updated_at: new Date().toISOString() })
+      .eq('id', user.id)
+      .select('id, name, email, role, profile, updated_at')
+      .single();
+    if (error) throw new Error(`Unable to update profile photo: ${error.message}`);
+    return data as StoredUser;
+  }
+
+  private async ensureResumeBucket() {
+    const { data } = await this.client.storage.getBucket('user-resumes');
+    if (data) return;
+
+    const { error } = await this.client.storage.createBucket('user-resumes', {
+      public: false,
+      fileSizeLimit: 2 * 1024 * 1024,
+      allowedMimeTypes: [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/rtf',
+      ],
+    });
+    if (error && !/already exists|duplicate/i.test(error.message)) {
+      throw new Error(`Unable to initialize resume storage bucket: ${error.message}`);
+    }
+  }
+
+  async uploadUserResume(email: string, file: { originalname: string; mimetype: string; size: number; buffer: Buffer }) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data: user, error: userError } = await this.client.from('users').select('id, profile').eq('email', normalizedEmail).single();
+    if (userError) throw new Error(`Unable to load user for resume upload: ${userError.message}`);
+
+    const extension = file.originalname.split('.').pop()?.toLowerCase() || '';
+    const contentTypes: Record<string, string> = {
+      pdf: 'application/pdf',
+      doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      rtf: 'application/rtf',
+    };
+    const contentType = contentTypes[extension];
+    if (!contentType) throw new Error('Resume must be a PDF, DOC, DOCX, or RTF file.');
+    if (file.size > 2 * 1024 * 1024) throw new Error('Resume file must be 2 MB or smaller.');
+    await this.ensureResumeBucket();
+
+    const safeName = file.originalname.replace(/[\\/]/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120);
+    const storagePath = `${user.id}/${Date.now()}-${safeName}`;
+    const { error: uploadError } = await this.client.storage.from('user-resumes').upload(storagePath, file.buffer, {
+      contentType,
+      upsert: false,
+    });
+    if (uploadError) throw new Error(`Unable to upload resume: ${uploadError.message}`);
+
+    const previousResume = user.profile?.resume as { storagePath?: string } | undefined;
+    const profile = { ...(user.profile || {}), resume: { fileName: file.originalname, size: file.size, contentType, storagePath, uploadedAt: new Date().toISOString() } };
+    const { data, error } = await this.client.from('users').update({ profile, updated_at: new Date().toISOString() }).eq('id', user.id).select('updated_at').single();
+    if (error) {
+      await this.client.storage.from('user-resumes').remove([storagePath]);
+      throw new Error(`Unable to save resume details: ${error.message}`);
+    }
+
+    if (previousResume?.storagePath) await this.client.storage.from('user-resumes').remove([previousResume.storagePath]);
+    const { data: signedUrlData, error: signedUrlError } = await this.client.storage.from('user-resumes').createSignedUrl(storagePath, 3600);
+    if (signedUrlError) throw new Error(`Unable to create resume download link: ${signedUrlError.message}`);
+
+    return { resume: profile.resume, downloadUrl: signedUrlData.signedUrl, updated_at: data.updated_at };
+  }
+
+  async getUserResume(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data: user, error } = await this.client.from('users').select('profile').eq('email', normalizedEmail).single();
+    if (error) throw new Error(`Unable to load resume: ${error.message}`);
+    const resume = user.profile?.resume as { storagePath?: string } | undefined;
+    if (!resume?.storagePath) return null;
+
+    const { data, error: signedUrlError } = await this.client.storage.from('user-resumes').createSignedUrl(resume.storagePath, 3600);
+    if (signedUrlError) throw new Error(`Unable to create resume download link: ${signedUrlError.message}`);
+    return { resume, downloadUrl: data.signedUrl };
+  }
+
+  async deleteUserResume(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data: user, error } = await this.client.from('users').select('id, profile').eq('email', normalizedEmail).single();
+    if (error) throw new Error(`Unable to load user for resume removal: ${error.message}`);
+    const resume = user.profile?.resume as { storagePath?: string } | undefined;
+    if (resume?.storagePath) {
+      const { error: removeError } = await this.client.storage.from('user-resumes').remove([resume.storagePath]);
+      if (removeError) throw new Error(`Unable to remove resume file: ${removeError.message}`);
+    }
+
+    const profile = { ...(user.profile || {}) };
+    delete profile.resume;
+    const { data: updatedUser, error: updateError } = await this.client.from('users').update({ profile, updated_at: new Date().toISOString() }).eq('id', user.id).select('updated_at').single();
+    if (updateError) throw new Error(`Unable to remove resume details: ${updateError.message}`);
+    return { updated_at: updatedUser.updated_at };
   }
 
   async getLatestOtp(email: string): Promise<StoredOtp | null> {
@@ -145,6 +361,54 @@ export class DatabaseService {
       throw new Error(`Unable to load jobs: ${error.message}`);
     }
     return (data || []) as JobRecord[];
+  }
+
+  async getUserJobApplications(email: string): Promise<Record<string, unknown>[]> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data: user, error: userError } = await this.client.from('users').select('id, profile').eq('email', normalizedEmail).single();
+    if (userError) throw new Error(`Unable to load user applications: ${userError.message}`);
+    const { data, error } = await this.client
+      .from('user_job_applications')
+      .select('job_snapshot, applied_at')
+      .eq('user_id', user.id)
+      .order('applied_at', { ascending: false });
+    if (error) {
+      if (error.message.includes("Could not find the table 'public.user_job_applications'")) {
+        return Array.isArray(user.profile?.appliedJobs) ? user.profile.appliedJobs as Record<string, unknown>[] : [];
+      }
+      throw new Error(`Unable to load user applications: ${error.message}`);
+    }
+    return (data || []).map((application) => ({ ...(application.job_snapshot as Record<string, unknown>), appliedAt: application.applied_at }));
+  }
+
+  async applyUserToJob(email: string, job: Record<string, unknown>) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const jobId = typeof job.id === 'string' || typeof job.id === 'number' ? String(job.id) : '';
+    if (!jobId || typeof job.title !== 'string' || typeof job.url !== 'string') {
+      throw new Error('A valid job id, title, and URL are required.');
+    }
+    const { data: user, error: userError } = await this.client.from('users').select('id, profile').eq('email', normalizedEmail).single();
+    if (userError) throw new Error(`Unable to load user for application: ${userError.message}`);
+    const { data, error } = await this.client.from('user_job_applications').upsert({
+      user_id: user.id,
+      job_id: jobId,
+      job_source: typeof job.source === 'string' ? job.source : 'career-portal',
+      job_snapshot: job,
+      applied_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,job_id' }).select('job_snapshot, applied_at').single();
+    if (error) {
+      if (error.message.includes("Could not find the table 'public.user_job_applications'")) {
+        const applications = Array.isArray(user.profile?.appliedJobs) ? user.profile.appliedJobs as Record<string, unknown>[] : [];
+        const application = { ...job, id: jobId, appliedAt: new Date().toISOString() };
+        const nextApplications = [application, ...applications.filter((existing) => String(existing.id) !== jobId)];
+        const profile = { ...(user.profile || {}), appliedJobs: nextApplications };
+        const { error: profileError } = await this.client.from('users').update({ profile, updated_at: new Date().toISOString() }).eq('id', user.id);
+        if (profileError) throw new Error(`Unable to save job application: ${profileError.message}`);
+        return application;
+      }
+      throw new Error(`Unable to save job application: ${error.message}`);
+    }
+    return { ...(data.job_snapshot as Record<string, unknown>), appliedAt: data.applied_at };
   }
 
   async getLibraryTopics(): Promise<LibraryTopicRecord[]> {

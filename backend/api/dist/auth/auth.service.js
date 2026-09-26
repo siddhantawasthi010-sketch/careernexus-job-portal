@@ -98,6 +98,36 @@ let AuthService = class AuthService {
         const user = await this.databaseService.updateUserProfile(normalizedEmail, profile);
         return { user };
     }
+    async updateProfilePhoto(email, photo) {
+        const normalizedEmail = email.trim().toLowerCase();
+        if (!normalizedEmail || typeof photo !== 'string' || !photo) {
+            throw new common_1.UnauthorizedException('A valid email and profile photo are required.');
+        }
+        const user = await this.databaseService.updateUserProfilePhoto(normalizedEmail, photo);
+        return { user };
+    }
+    async uploadResume(email, file) {
+        if (!email?.trim())
+            throw new common_1.BadRequestException('A valid email is required.');
+        try {
+            return await this.databaseService.uploadUserResume(email, file);
+        }
+        catch (error) {
+            if (error instanceof Error && error.message.startsWith('Resume'))
+                throw new common_1.BadRequestException(error.message);
+            throw error;
+        }
+    }
+    async getResume(email) {
+        if (!email?.trim())
+            throw new common_1.BadRequestException('A valid email is required.');
+        return (await this.databaseService.getUserResume(email)) || { resume: null, downloadUrl: null };
+    }
+    async deleteResume(email) {
+        if (!email?.trim())
+            throw new common_1.BadRequestException('A valid email is required.');
+        return this.databaseService.deleteUserResume(email);
+    }
     async resendOtp(email, role) {
         return this.sendOtp(email, role);
     }

@@ -1,4 +1,10 @@
 import { AuthService } from './auth.service';
+interface ResumeUploadFile {
+    originalname: string;
+    mimetype: string;
+    size: number;
+    buffer: Buffer;
+}
 export declare class AuthController {
     private readonly authService;
     constructor(authService: AuthService);
@@ -36,4 +42,25 @@ export declare class AuthController {
     }): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;
+    updateProfilePhoto(body: {
+        email: string;
+        photo: string;
+    }): Promise<{
+        user: import("../database/database.service").StoredUser;
+    }>;
+    uploadResume(email: string, file: ResumeUploadFile | undefined): Promise<{
+        resume: any;
+        downloadUrl: string;
+        updated_at: any;
+    }>;
+    getResume(email: string): Promise<{
+        resume: {
+            storagePath?: string;
+        };
+        downloadUrl: string;
+    }>;
+    deleteResume(email: string): Promise<{
+        updated_at: any;
+    }>;
 }
+export {};

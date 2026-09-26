@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
 const auth_service_1 = require("./auth.service");
 let AuthController = class AuthController {
     constructor(authService) {
@@ -30,6 +31,20 @@ let AuthController = class AuthController {
     }
     updateProfile(body) {
         return this.authService.updateProfile(body.email, body.profile);
+    }
+    updateProfilePhoto(body) {
+        return this.authService.updateProfilePhoto(body.email, body.photo);
+    }
+    uploadResume(email, file) {
+        if (!file)
+            throw new common_1.BadRequestException('Select a resume file to upload.');
+        return this.authService.uploadResume(email, file);
+    }
+    getResume(email) {
+        return this.authService.getResume(email);
+    }
+    deleteResume(email) {
+        return this.authService.deleteResume(email);
     }
 };
 exports.AuthController = AuthController;
@@ -61,6 +76,36 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "updateProfile", null);
+__decorate([
+    (0, common_1.Put)('profile/photo'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "updateProfilePhoto", null);
+__decorate([
+    (0, common_1.Post)('profile/resume'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', { limits: { fileSize: 2 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Body)('email')),
+    __param(1, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "uploadResume", null);
+__decorate([
+    (0, common_1.Get)('profile/resume'),
+    __param(0, (0, common_1.Query)('email')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "getResume", null);
+__decorate([
+    (0, common_1.Delete)('profile/resume'),
+    __param(0, (0, common_1.Body)('email')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "deleteResume", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
     __metadata("design:paramtypes", [auth_service_1.AuthService])
