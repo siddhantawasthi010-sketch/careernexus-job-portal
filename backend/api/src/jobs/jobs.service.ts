@@ -135,6 +135,40 @@ export class JobsService {
     }
 
     const providers = this.getProviders(search.keywords, search.locations);
+    if (providers.length) {
+      try {
+        const cachedJobs = await this.databaseService.getRecentFeedJobs();
+        const cachedMatches = cachedJobs
+          .map((job) => ({ ...job, matchScore: this.scoreJob(job, user.profile) }))
+          .filter((job) => job.matchScore > 0)
+          .sort((left, right) => right.matchScore - left.matchScore);
+
+        if (cachedMatches.length) {
+          void Promise.allSettled(providers.map((provider) => this.getProviderJobs(provider)))
+            .then(async (results) => {
+              const refreshedJobs = Array.from(new Map(results
+                .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
+                .map((job) => [`${normalize(job.title)}|${normalize(job.company)}|${normalize(job.location)}`, job])).values());
+              if (refreshedJobs.length) await this.databaseService.saveFeedJobs(refreshedJobs);
+            })
+            .catch((error) => console.warn('Unable to refresh cached job recommendations:', error));
+
+          return {
+            jobs: cachedMatches,
+            updatedAt: new Date().toISOString(),
+            sourcesConfigured: providers.length,
+            sourcesFailed: [],
+            fetchedCount: 0,
+            matchedCount: cachedMatches.length,
+            homeMatchCount: cachedMatches.length,
+            diagnostic: 'Showing recent matches while job sources refresh.',
+          };
+        }
+      } catch (error) {
+        console.warn('Unable to read cached job recommendations:', error);
+      }
+    }
+
     const results = await Promise.allSettled(providers.map((provider) => this.getProviderJobs(provider)));
     const fetchedJobs = Array.from(new Map(results
       .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
