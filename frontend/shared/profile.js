@@ -53,6 +53,8 @@ export function calculateProfileCompletion(profile = {}) {
     completionRatio([
       profile.preferredJobRole,
       profile.preferredCity,
+      profile.expectedSalaryLpa,
+      profile.totalExperienceYears,
       profile.jobType,
       profile.employmentType,
       profile.preferredShift,

@@ -1,13 +1,20 @@
+import { OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-export declare class JobsService {
+export declare class JobsService implements OnModuleInit {
     private readonly databaseService;
     private readonly providerJobCache;
     private readonly providerRetryAfter;
+    private readonly logger;
+    private feedRefreshRunning;
+    private lastFeedRefreshAt;
+    private lastFeedRefreshFailures;
     constructor(databaseService: DatabaseService);
+    onModuleInit(): void;
+    refreshJobFeedsOnSchedule(): Promise<void>;
     getJobs(): Promise<import("../database/database.service").JobRecord[]>;
     getFeaturedJobs(): Promise<import("../database/database.service").JobRecord[]>;
     getCareerPortals(): Promise<import("../database/database.service").CareerPortalRecord[]>;
-    getRecommendations(email: string): Promise<{
+    getRecommendations(email: string, requestedLimit?: number, requestedOffset?: number): Promise<{
         jobs: any[];
         updatedAt: string;
         sourcesConfigured: number;
@@ -16,6 +23,10 @@ export declare class JobsService {
         fetchedCount?: undefined;
         matchedCount?: undefined;
         homeMatchCount?: undefined;
+        limit?: undefined;
+        offset?: undefined;
+        hasMore?: undefined;
+        nextOffset?: undefined;
     } | {
         jobs: {
             matchScore: number;
@@ -43,8 +54,14 @@ export declare class JobsService {
         fetchedCount: number;
         matchedCount: number;
         homeMatchCount: number;
+        limit: number;
+        offset: number;
+        hasMore: boolean;
+        nextOffset: number;
         diagnostic: string;
     }>;
+    private refreshJobFeeds;
+    private syncLearningContentFromJobs;
     private getProfileSearch;
     private getProviders;
     private getProviderJobs;
@@ -54,6 +71,10 @@ export declare class JobsService {
     private fetchAdzuna;
     private fetchJooble;
     private fetchJSearch;
+    private fetchGoogleJobs;
+    private fetchArbeitnow;
+    private fetchAshby;
+    private fetchSmartRecruiters;
     private fetchGreenhouse;
     private fetchLever;
     private getWorkdayTenants;

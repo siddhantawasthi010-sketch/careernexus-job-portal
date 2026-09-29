@@ -28,8 +28,8 @@ let JobsController = class JobsController {
     getCareerPortals() {
         return this.jobsService.getCareerPortals();
     }
-    getRecommendations(email) {
-        return this.jobsService.getRecommendations(email);
+    getRecommendations(email, limit, offset) {
+        return this.jobsService.getRecommendations(email, Number(limit), Number(offset));
     }
     getApplications(email) {
         return this.jobsService.getApplications(email);
@@ -60,8 +60,10 @@ __decorate([
 __decorate([
     (0, common_1.Get)('recommendations'),
     __param(0, (0, common_1.Query)('email')),
+    __param(1, (0, common_1.Query)('limit')),
+    __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], JobsController.prototype, "getRecommendations", null);
 __decorate([

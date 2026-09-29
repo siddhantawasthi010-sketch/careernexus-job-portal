@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { DatabaseService } from '../database/database.service';
+import { jobLearningCatalog } from './job-learning-catalog';
 
 interface PortalJob {
   id: string;
@@ -48,6 +50,17 @@ const asStrings = (value: unknown): string[] => Array.isArray(value)
   : typeof value === 'string' && value.trim() ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9+#. ]/g, ' ').replace(/\s+/g, ' ').trim();
 const stripMarkup = (value: string) => value.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim();
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const mentionsSkill = (text: string, matcher: string) => new RegExp(`(^|[^a-z0-9])${escapeRegExp(matcher)}(?=$|[^a-z0-9])`, 'i').test(text);
+const workdayListingUrl = (host: string, site: string, externalPath: string) => {
+  if (/^https?:\/\//i.test(externalPath)) return externalPath;
+  const path = externalPath.startsWith('/') ? externalPath : `/${externalPath}`;
+  const lowerPath = path.toLowerCase();
+  const lowerSite = site.toLowerCase();
+  const includesSitePath = lowerPath.startsWith(`/en-us/${lowerSite}/`) || lowerPath.startsWith(`/${lowerSite}/`);
+  const publicPath = includesSitePath ? path : `/en-US/${site}${path}`;
+  return new URL(publicPath, `https://${host.replace(/^https?:\/\//i, '').replace(/\/$/, '')}`).toString();
+};
 const cityAliases: Record<string, string[]> = {
   bengaluru: ['bangalore'], bangalore: ['bengaluru'],
   gurugram: ['gurgaon'], gurgaon: ['gurugram'],
@@ -76,6 +89,67 @@ const inferShift = (text: string): string | null => {
   return null;
 };
 
+const parseSalaryLpa = (value: string | null) => {
+  if (!value || !/(?:\bINR\b|₹|\bLPA\b|\blakhs?\b)/i.test(value)) return null;
+  const amounts = Array.from(value.matchAll(/\d[\d,]*(?:\.\d+)?/g), (match) => Number(match[0].replace(/,/g, ''))).filter(Number.isFinite);
+  if (!amounts.length) return null;
+  if (/\bLPA\b|\blakhs?\b/i.test(value)) return amounts.reduce((total, amount) => total + amount, 0) / amounts.length;
+  const multiplier = /\bmonth(?:ly)?\b/i.test(value) ? 12 : 1;
+  return amounts.reduce((total, amount) => total + amount, 0) / amounts.length * multiplier / 100000;
+};
+
+const getExperienceYears = (profile: Record<string, unknown>) => {
+  const explicitExperience = profile.totalExperienceYears;
+  const explicitYears = explicitExperience === undefined || explicitExperience === null || String(explicitExperience).trim() === ''
+    ? Number.NaN
+    : Number(explicitExperience);
+  if (Number.isFinite(explicitYears) && explicitYears >= 0) return explicitYears;
+  const entries = Array.isArray(profile.employmentDetails) ? profile.employmentDetails.map((entry) => asRecord(entry)) : [];
+  const intervals = entries.map((entry) => {
+    const start = Date.parse(asString(entry.joiningDate));
+    const end = entry.isCurrent ? Date.now() : Date.parse(asString(entry.relievingDate));
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start ? { start, end } : null;
+  }).filter((interval): interval is { start: number; end: number } => interval !== null).sort((left, right) => left.start - right.start);
+  if (!intervals.length) return null;
+  let totalMilliseconds = 0;
+  let mergedStart = intervals[0].start;
+  let mergedEnd = intervals[0].end;
+  for (const interval of intervals.slice(1)) {
+    if (interval.start <= mergedEnd) mergedEnd = Math.max(mergedEnd, interval.end);
+    else {
+      totalMilliseconds += mergedEnd - mergedStart;
+      mergedStart = interval.start;
+      mergedEnd = interval.end;
+    }
+  }
+  totalMilliseconds += mergedEnd - mergedStart;
+  return totalMilliseconds / (365.25 * 24 * 60 * 60 * 1000);
+};
+
+const getRequiredExperience = (text: string) => {
+  const ranges = [
+    /\b(\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\s+(?:of\s+)?(?:(?:relevant|professional|work|industry)\s+)?experience\b/gi,
+    /\b(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?)\s+(?:of\s+)?(?:(?:relevant|professional|work|industry)\s+)?experience\b/gi,
+  ];
+  for (const pattern of ranges) {
+    const match = pattern.exec(text);
+    if (match) return { minimum: Number(match[1]), maximum: match[2] ? Number(match[2]) : null };
+  }
+  return null;
+};
+
+const mapWithConcurrency = async <T, R>(items: T[], concurrency: number, mapper: (item: T) => Promise<R>): Promise<R[]> => {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      results[currentIndex] = await mapper(items[currentIndex]);
+    }
+  }));
+  return results;
+};
+
 const textMatch = (query: string, haystack: string) => {
   const normalizedQuery = normalize(query);
   const normalizedHaystack = normalize(haystack);
@@ -100,11 +174,24 @@ const noticeSignal = (noticePeriod: string, text: string) => {
 };
 
 @Injectable()
-export class JobsService {
+export class JobsService implements OnModuleInit {
   private readonly providerJobCache = new Map<string, CachedProviderJobs>();
   private readonly providerRetryAfter = new Map<string, number>();
+  private readonly logger = new Logger(JobsService.name);
+  private feedRefreshRunning = false;
+  private lastFeedRefreshAt: string | null = null;
+  private lastFeedRefreshFailures: { source: string; message: string }[] = [];
 
   constructor(private readonly databaseService: DatabaseService) {}
+
+  onModuleInit() {
+    void this.refreshJobFeeds();
+  }
+
+  @Cron('0 0 */2 * * *')
+  async refreshJobFeedsOnSchedule() {
+    await this.refreshJobFeeds();
+  }
 
   getJobs() {
     return this.databaseService.getJobs();
@@ -118,7 +205,7 @@ export class JobsService {
     return this.databaseService.getCareerPortals();
   }
 
-  async getRecommendations(email: string) {
+  async getRecommendations(email: string, requestedLimit = 12, requestedOffset = 0) {
     const normalizedEmail = email?.trim().toLowerCase();
     if (!normalizedEmail) throw new UnauthorizedException('A valid email is required to find matching jobs.');
     const user = await this.databaseService.getUserByEmail(normalizedEmail);
@@ -135,92 +222,125 @@ export class JobsService {
     }
 
     const providers = this.getProviders(search.keywords, search.locations);
-    if (providers.length) {
-      try {
-        const cachedJobs = await this.databaseService.getRecentFeedJobs();
-        const cachedMatches = cachedJobs
-          .map((job) => ({ ...job, matchScore: this.scoreJob(job, user.profile) }))
-          .filter((job) => job.matchScore > 0)
-          .sort((left, right) => right.matchScore - left.matchScore);
-
-        if (cachedMatches.length) {
-          void Promise.allSettled(providers.map((provider) => this.getProviderJobs(provider)))
-            .then(async (results) => {
-              const refreshedJobs = Array.from(new Map(results
-                .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-                .map((job) => [`${normalize(job.title)}|${normalize(job.company)}|${normalize(job.location)}`, job])).values());
-              if (refreshedJobs.length) await this.databaseService.saveFeedJobs(refreshedJobs);
-            })
-            .catch((error) => console.warn('Unable to refresh cached job recommendations:', error));
-
-          return {
-            jobs: cachedMatches,
-            updatedAt: new Date().toISOString(),
-            sourcesConfigured: providers.length,
-            sourcesFailed: [],
-            fetchedCount: 0,
-            matchedCount: cachedMatches.length,
-            homeMatchCount: cachedMatches.length,
-            diagnostic: 'Showing recent matches while job sources refresh.',
-          };
-        }
-      } catch (error) {
-        console.warn('Unable to read cached job recommendations:', error);
-      }
-    }
-
-    const results = await Promise.allSettled(providers.map((provider) => this.getProviderJobs(provider)));
-    const fetchedJobs = Array.from(new Map(results
-      .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-      .map((job) => [`${normalize(job.title)}|${normalize(job.company)}|${normalize(job.location)}`, job])).values());
-    const sourcesFailed = results.flatMap((result, index) => {
-      if (result.status !== 'rejected') return [];
-      const message = result.reason instanceof Error ? result.reason.message : 'Provider request failed.';
-      if (providers[index].name === 'JSearch' && /HTTP (403|429)/.test(message)) return [];
-      return [{ source: providers[index].name, message: this.formatProviderFailure(providers[index].name, result.reason) }];
-    });
-    let recentJobs = fetchedJobs;
-    if (fetchedJobs.length) {
-      try {
-        await this.databaseService.saveFeedJobs(fetchedJobs);
-      } catch (error) {
-        sourcesFailed.push({ source: 'PostgreSQL cache', message: error instanceof Error ? error.message : 'Unable to cache fetched jobs.' });
-      }
-    } else {
-      try {
-        recentJobs = await this.databaseService.getRecentFeedJobs();
-      } catch (error) {
-        sourcesFailed.push({ source: 'PostgreSQL cache', message: error instanceof Error ? error.message : 'Unable to load cached jobs.' });
-      }
-    }
-    const jobs = recentJobs
+    const allMatches = (await this.databaseService.getRecentFeedJobs())
       .map((job) => ({ ...job, matchScore: this.scoreJob(job, user.profile) }))
       .filter((job) => job.matchScore > 0)
       .sort((left, right) => right.matchScore - left.matchScore);
-    const homeMatchCount = jobs.length;
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(30, Math.floor(requestedLimit))) : 12;
+    const offset = Number.isFinite(requestedOffset) ? Math.max(0, Math.floor(requestedOffset)) : 0;
+    const jobs = allMatches.slice(offset, offset + limit);
+    const homeMatchCount = allMatches.length;
     let diagnostic = '';
     if (!providers.length) {
       diagnostic = 'No job feed providers are configured. Add provider credentials or ATS board identifiers to the backend environment.';
-    } else if (!recentJobs.length && sourcesFailed.length) {
-      diagnostic = 'All configured job feeds failed. Check the provider errors below.';
-    } else if (!recentJobs.length) {
-      diagnostic = 'The configured providers returned no postings for this search. Try a broader role or another preferred city.';
     } else if (!homeMatchCount) {
-      diagnostic = `Fetched ${recentJobs.length} postings, but none matched the required city and profile criteria.`;
-    } else if (!fetchedJobs.length) {
-      diagnostic = 'Showing recently cached matches because no new postings were returned.';
+      diagnostic = this.lastFeedRefreshAt
+        ? `No cached postings currently match your profile and location. Feed last refreshed ${this.lastFeedRefreshAt}.`
+        : 'Job feeds are warming up. Matching postings will appear as the first scheduled refresh completes.';
     }
 
     return {
       jobs,
-      updatedAt: new Date().toISOString(),
+      updatedAt: this.lastFeedRefreshAt || new Date().toISOString(),
       sourcesConfigured: providers.length,
-      sourcesFailed,
-      fetchedCount: fetchedJobs.length,
-      matchedCount: jobs.length,
+      sourcesFailed: this.lastFeedRefreshFailures,
+      fetchedCount: 0,
+      matchedCount: allMatches.length,
       homeMatchCount,
+      limit,
+      offset,
+      hasMore: offset + jobs.length < allMatches.length,
+      nextOffset: offset + jobs.length,
       diagnostic,
     };
+  }
+
+  private async refreshJobFeeds() {
+    if (this.feedRefreshRunning) return;
+    this.feedRefreshRunning = true;
+    const refreshStartedAt = new Date().toISOString();
+    const failedSources = new Map<string, string>();
+    try {
+      const profiles = await this.databaseService.getCandidateJobSearchProfiles();
+      const searches = Array.from(new Map(profiles
+        .map((profile) => this.getProfileSearch(profile))
+        .filter((search) => search.locations.length && search.keywords)
+        .map((search) => [`${normalize(search.keywords)}|${search.locations.map(normalize).sort().join(',')}`, search])).values());
+      const providersByKey = new Map<string, JobProvider>();
+      const staticOnlySources = new Set(['Arbeitnow', 'Greenhouse', 'Ashby', 'SmartRecruiters']);
+      const searchInputs = searches.length ? searches : [{ keywords: '', locations: [] }];
+      for (const search of searchInputs) {
+        for (const provider of this.getProviders(search.keywords, search.locations)) {
+          if (!searches.length && !staticOnlySources.has(provider.name)) continue;
+          providersByKey.set(provider.cacheKey, provider);
+        }
+      }
+
+      const providers = Array.from(providersByKey.values());
+      const outcomes = await mapWithConcurrency(providers, 4, async (provider) => {
+        try {
+          return { provider, jobs: await this.getProviderJobs(provider), error: '' };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Provider request failed.';
+          return { provider, jobs: [] as PortalJob[], error: this.formatProviderFailure(provider.name, error) || message };
+        }
+      });
+      const jobs = outcomes.flatMap((outcome) => outcome.jobs);
+      const outcomesBySource = new Map<string, typeof outcomes>();
+      for (const outcome of outcomes) {
+        const sourceOutcomes = outcomesBySource.get(outcome.provider.name) || [];
+        sourceOutcomes.push(outcome);
+        outcomesBySource.set(outcome.provider.name, sourceOutcomes);
+        if (outcome.error) failedSources.set(outcome.provider.name, outcome.error);
+      }
+      if (jobs.length) await this.databaseService.saveFeedJobs(jobs);
+      for (const [source, sourceOutcomes] of outcomesBySource) {
+        if (sourceOutcomes.some((outcome) => outcome.error)) continue;
+        await this.databaseService.deleteStaleFeedJobs(source, refreshStartedAt);
+      }
+      try {
+        await this.syncLearningContentFromJobs();
+      } catch (error) {
+        this.logger.warn(`Unable to synchronize job skills to Library and Courses: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+      this.lastFeedRefreshAt = new Date().toISOString();
+      this.lastFeedRefreshFailures = Array.from(failedSources, ([source, message]) => ({ source, message }));
+      this.logger.log(`Job feed refresh complete: ${jobs.length} listings from ${providers.length} provider searches.`);
+    } catch (error) {
+      this.logger.error('Job feed refresh failed.', error instanceof Error ? error.stack : undefined);
+      this.lastFeedRefreshFailures = [{ source: 'Job feed scheduler', message: error instanceof Error ? error.message : 'Unable to refresh job feeds.' }];
+    } finally {
+      this.feedRefreshRunning = false;
+    }
+  }
+
+  private async syncLearningContentFromJobs() {
+    const jobs = await this.databaseService.getRecentFeedJobs();
+    const jobText = jobs.map((job) => `${job.title} ${job.description}`).join('\n');
+    const discoveredSkills = jobLearningCatalog.filter((skill) => skill.matchers.some((matcher) => mentionsSkill(jobText, matcher)));
+    if (!discoveredSkills.length) return;
+
+    const topics = discoveredSkills.map((skill) => ({
+      name: skill.name,
+      briefDescription: skill.briefDescription,
+      explanation: skill.explanation,
+      example: skill.example,
+    }));
+    const courseSearchProviders = [
+      { provider: 'Coursera', baseUrl: 'https://www.coursera.org/search?query=' },
+      { provider: 'Udemy', baseUrl: 'https://www.udemy.com/courses/search/?q=' },
+    ];
+    const courses = discoveredSkills.flatMap((skill) => courseSearchProviders.map(({ provider, baseUrl }) => ({
+      title: `${skill.name} courses on ${provider}`,
+      topic: skill.name,
+      provider,
+      level: 'All levels',
+      duration: 'Self-paced',
+      url: `${baseUrl}${encodeURIComponent(skill.name)}`,
+    })));
+
+    await this.databaseService.addMissingJobLearningContent(topics, courses);
+    this.logger.log(`Synchronized ${discoveredSkills.length} job skills to the Library and Courses.`);
   }
 
   private getProfileSearch(profile: Record<string, unknown>) {
@@ -247,6 +367,10 @@ export class JobsService {
   private getProviders(keywords: string, locations: string[]): JobProvider[] {
     const providers: JobProvider[] = [];
     const searchKey = `${normalize(keywords)}|${locations.map(normalize).join(',')}`;
+    providers.push({ name: 'Arbeitnow', cacheKey: 'arbeitnow:public-feed', fetchJobs: () => this.fetchArbeitnow() });
+    const serpApiKey = process.env.SERPAPI_API_KEY;
+    if (serpApiKey) providers.push({ name: 'Google Jobs (SerpApi)', cacheKey: `google-jobs:${searchKey}`, fetchJobs: () => this.fetchGoogleJobs(serpApiKey, keywords, locations) });
+
     const adzunaAppId = process.env.ADZUNA_APP_ID;
     const adzunaAppKey = process.env.ADZUNA_APP_KEY;
     if (adzunaAppId && adzunaAppKey) providers.push({ name: 'Adzuna', cacheKey: `adzuna:${searchKey}`, fetchJobs: () => this.fetchAdzuna(adzunaAppId, adzunaAppKey, keywords, locations) });
@@ -257,6 +381,10 @@ export class JobsService {
     if (greenhouseBoards.length) providers.push({ name: 'Greenhouse', cacheKey: `greenhouse:${greenhouseBoards.slice().sort().join(',')}`, fetchJobs: () => this.fetchGreenhouse(greenhouseBoards) });
     const leverSites = asStrings(process.env.LEVER_COMPANY_SITES);
     if (leverSites.length) providers.push({ name: 'Lever', cacheKey: `lever:${leverSites.slice().sort().join(',')}:${locations.map(normalize).join(',')}`, fetchJobs: () => this.fetchLever(leverSites, locations) });
+    const ashbyBoards = asStrings(process.env.ASHBY_JOB_BOARDS);
+    if (ashbyBoards.length) providers.push({ name: 'Ashby', cacheKey: `ashby:${ashbyBoards.slice().sort().join(',')}`, fetchJobs: () => this.fetchAshby(ashbyBoards) });
+    const smartRecruitersCompanies = asStrings(process.env.SMARTRECRUITERS_COMPANIES);
+    if (smartRecruitersCompanies.length) providers.push({ name: 'SmartRecruiters', cacheKey: `smartrecruiters:${smartRecruitersCompanies.slice().sort().join(',')}`, fetchJobs: () => this.fetchSmartRecruiters(smartRecruitersCompanies) });
     const workdayTenants = this.getWorkdayTenants();
     if (workdayTenants.length) providers.push({ name: 'Workday', cacheKey: `workday:${JSON.stringify(workdayTenants)}:${searchKey}`, fetchJobs: () => this.fetchWorkday(workdayTenants, keywords, locations) });
     return providers;
@@ -377,6 +505,109 @@ export class JobsService {
     return batches.flat();
   }
 
+  private async fetchGoogleJobs(apiKey: string, keywords: string, locations: string[]): Promise<PortalJob[]> {
+    const configuredLimit = Number(process.env.GOOGLE_JOBS_MAX_LOCATIONS || 1);
+    const locationLimit = Number.isFinite(configuredLimit) ? Math.max(1, Math.min(3, configuredLimit)) : 1;
+    const country = (process.env.GOOGLE_JOBS_COUNTRY || 'in').toLowerCase();
+    const language = process.env.GOOGLE_JOBS_LANGUAGE || 'en';
+    const batches = await Promise.all(locations.slice(0, locationLimit).map(async (location) => {
+      const params = new URLSearchParams({
+        engine: 'google_jobs',
+        q: `${keywords} jobs`,
+        location,
+        gl: country,
+        hl: language,
+        api_key: apiKey,
+      });
+      const data = asRecord(await this.requestJson(`https://serpapi.com/search.json?${params}`));
+      return asArray(data.jobs_results).map((job) => {
+        const extensions = asRecord(job.detected_extensions);
+        const applyOptions = asArray(job.apply_options);
+        const url = asString(applyOptions[0]?.link) || asString(job.share_link);
+        const sourceId = asString(job.job_id) || url;
+        const highlights = asArray(job.job_highlights).flatMap((section) => asStrings(section.items)).join(' ');
+        const description = [asString(job.description), highlights].filter(Boolean).join(' ');
+        const employmentType = asString(extensions.schedule_type) || null;
+        return this.createJob('Google Jobs (SerpApi)', sourceId, asString(job.title), asString(job.company_name), asString(job.location), description, url, {
+          type: employmentType || undefined,
+          employmentType,
+          salary: asString(extensions.salary) || null,
+          postedAt: asString(extensions.posted_at) || null,
+        });
+      }).filter((job): job is PortalJob => job !== null);
+    }));
+    return batches.flat();
+  }
+
+  private async fetchArbeitnow(): Promise<PortalJob[]> {
+    const data = asRecord(await this.requestJson('https://www.arbeitnow.com/api/job-board-api'));
+    return asArray(data.data).map((job) => {
+      const jobTypes = asStrings(job.job_types);
+      const url = asString(job.url);
+      const location = [asString(job.location), job.remote === true ? 'Remote' : ''].filter(Boolean).join(' ');
+      return this.createJob('Arbeitnow', asString(job.slug) || url, asString(job.title), asString(job.company_name), location, stripMarkup(asString(job.description)), url, {
+        type: jobTypes[0],
+        employmentType: jobTypes[0] || null,
+        postedAt: asString(job.created_at) || null,
+      });
+    }).filter((job): job is PortalJob => job !== null);
+  }
+
+  private async fetchAshby(boards: string[]): Promise<PortalJob[]> {
+    const batches = await Promise.all(boards.map(async (board) => {
+      const data = asRecord(await this.requestJson(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(board)}`));
+      return asArray(data.jobs).filter((job) => job.isListed !== false).map((job) => {
+        const address = asRecord(asRecord(job.address).postalAddress);
+        const secondaryLocations = asArray(job.secondaryLocations).map((item) => asString(item.location));
+        const location = [asString(job.location), ...secondaryLocations, asString(address.addressLocality), asString(address.addressRegion), asString(address.addressCountry)]
+          .filter((value, index, values) => value && values.indexOf(value) === index)
+          .join(', ');
+        const url = asString(job.applyUrl) || asString(job.jobUrl);
+        const employmentType = asString(job.employmentType) || null;
+        const compensation = asRecord(job.compensation);
+        return this.createJob('Ashby', asString(job.jobUrl) || url, asString(job.title), asString(job.companyName) || board, location, asString(job.descriptionPlain) || stripMarkup(asString(job.descriptionHtml)), url, {
+          type: employmentType || undefined,
+          employmentType,
+          salary: asString(compensation.scrapeableCompensationSalarySummary) || null,
+          postedAt: asString(job.publishedAt) || null,
+        });
+      }).filter((job): job is PortalJob => job !== null);
+    }));
+    return batches.flat();
+  }
+
+  private async fetchSmartRecruiters(companies: string[]): Promise<PortalJob[]> {
+    const configuredLimit = Number(process.env.SMARTRECRUITERS_MAX_POSTINGS || 20);
+    const postingLimit = Number.isFinite(configuredLimit) ? Math.max(1, Math.min(50, configuredLimit)) : 20;
+    const batches = await mapWithConcurrency(companies, 3, async (company) => {
+      const params = new URLSearchParams({ limit: String(postingLimit), offset: '0' });
+      const data = asRecord(await this.requestJson(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(company)}/postings?${params}`));
+      const details = await mapWithConcurrency(asArray(data.content).slice(0, postingLimit), 4, async (posting) => {
+        const postingId = asString(posting.id);
+        if (!postingId) return null;
+        const detail = asRecord(await this.requestJson(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(company)}/postings/${encodeURIComponent(postingId)}`));
+        const location = asRecord(posting.location);
+        const companyInfo = asRecord(detail.company || posting.company);
+        const jobAd = asRecord(detail.jobAd);
+        const sections = asRecord(jobAd.sections);
+        const description = Object.values(sections).map((section) => asString(asRecord(section).text)).filter(Boolean).map(stripMarkup).join(' ');
+        const employment = asRecord(posting.typeOfEmployment);
+        const locationText = [asString(location.city), asString(location.region), asString(location.country)]
+          .filter(Boolean)
+          .join(', ') || (location.remote === true ? 'Remote' : '');
+        const url = asString(detail.applyUrl) || asString(detail.postingUrl) || asString(posting.applyUrl) || asString(posting.jobAdUrl);
+        const employmentType = asString(employment.label) || null;
+        return this.createJob('SmartRecruiters', postingId, asString(posting.name), asString(companyInfo.name) || company, locationText, description, url, {
+          type: employmentType || undefined,
+          employmentType,
+          postedAt: asString(posting.releasedDate) || null,
+        });
+      });
+      return details.filter((job): job is PortalJob => job !== null);
+    });
+    return batches.flat();
+  }
+
   private async fetchGreenhouse(boards: string[]): Promise<PortalJob[]> {
     const batches = await Promise.all(boards.map(async (board) => {
       const data = asRecord(await this.requestJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`));
@@ -429,7 +660,7 @@ export class JobsService {
       const locationBatches = await Promise.all(locations.map(async (location) => {
         const data = asRecord(await this.requestJson(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: 0, searchText: `${keywords} ${location}` }),
-        }));
+        }, 6000));
         return asArray(data.jobPostings).map((job) => {
           const externalPath = asString(job.externalPath);
           const listedLocation = asString(job.locationsText) || asString(job.location) || asString(job.locationName);
@@ -440,7 +671,7 @@ export class JobsService {
           ].some((city) => normalize(searchableLocation).includes(normalize(city))));
           const pathLocation = externalPath.split('/').filter(Boolean)[1]?.replace(/-/g, ' ') || '';
           const jobLocation = listedLocation || matchingCandidateLocation || pathLocation || asStrings(job.bulletFields).join(', ');
-          const jobUrl = externalPath.startsWith('http') ? externalPath : `https://${host}${externalPath}`;
+          const jobUrl = workdayListingUrl(host, tenant.site, externalPath);
           return this.createJob('Workday', externalPath || asString(job.title), asString(job.title), tenant.company || tenant.tenant, jobLocation, asString(job.jobDescription) || asString(job.bulletFields), jobUrl, {
             postedAt: asString(job.postedOn) || null,
           });
@@ -514,6 +745,21 @@ export class JobsService {
     if (preferredJobType && job.jobType) add(10, normalize(preferredJobType) === normalize(job.jobType) ? 1 : 0);
     const preferredEmploymentType = asString(profile.employmentType);
     if (preferredEmploymentType && job.employmentType) add(10, normalize(preferredEmploymentType) === normalize(job.employmentType) ? 1 : 0);
+    const expectedSalaryLpa = Number(profile.expectedSalaryLpa);
+    const listedSalaryLpa = parseSalaryLpa(job.salary);
+    if (Number.isFinite(expectedSalaryLpa) && expectedSalaryLpa > 0 && listedSalaryLpa !== null) {
+      add(15, Math.min(1, listedSalaryLpa / expectedSalaryLpa));
+    }
+    const candidateExperienceYears = getExperienceYears(profile);
+    const requiredExperience = getRequiredExperience(text);
+    if (candidateExperienceYears !== null && requiredExperience) {
+      const experienceFit = candidateExperienceYears < requiredExperience.minimum
+        ? candidateExperienceYears / Math.max(requiredExperience.minimum, 1)
+        : requiredExperience.maximum && candidateExperienceYears > requiredExperience.maximum
+          ? requiredExperience.maximum / candidateExperienceYears
+          : 1;
+      add(15, Math.max(0, Math.min(1, experienceFit)));
+    }
     const preferredShift = asString(profile.preferredShift);
     if (preferredShift && job.preferredShift) add(5, normalize(preferredShift) === normalize(job.preferredShift) ? 1 : 0);
     const currentEmployment = employmentDetails.find((entry) => entry.isCurrent);

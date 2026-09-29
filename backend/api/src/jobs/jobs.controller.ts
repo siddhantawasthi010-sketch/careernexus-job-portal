@@ -21,8 +21,8 @@ export class JobsController {
   }
 
   @Get('recommendations')
-  getRecommendations(@Query('email') email: string) {
-    return this.jobsService.getRecommendations(email);
+  getRecommendations(@Query('email') email: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.jobsService.getRecommendations(email, Number(limit), Number(offset));
   }
 
   @Get('applications')

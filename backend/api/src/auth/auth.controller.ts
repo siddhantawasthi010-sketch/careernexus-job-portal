@@ -33,6 +33,11 @@ export class AuthController {
     return this.authService.updateProfile(body.email, body.profile);
   }
 
+  @Get('profile')
+  getProfile(@Query('email') email: string) {
+    return this.authService.getProfile(email);
+  }
+
   @Put('profile/photo')
   updateProfilePhoto(@Body() body: { email: string; photo: string }) {
     return this.authService.updateProfilePhoto(body.email, body.photo);

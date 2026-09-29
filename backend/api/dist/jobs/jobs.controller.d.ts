@@ -5,7 +5,7 @@ export declare class JobsController {
     getJobs(): Promise<import("../database/database.service").JobRecord[]>;
     getFeaturedJobs(): Promise<import("../database/database.service").JobRecord[]>;
     getCareerPortals(): Promise<import("../database/database.service").CareerPortalRecord[]>;
-    getRecommendations(email: string): Promise<{
+    getRecommendations(email: string, limit?: string, offset?: string): Promise<{
         jobs: any[];
         updatedAt: string;
         sourcesConfigured: number;
@@ -14,6 +14,10 @@ export declare class JobsController {
         fetchedCount?: undefined;
         matchedCount?: undefined;
         homeMatchCount?: undefined;
+        limit?: undefined;
+        offset?: undefined;
+        hasMore?: undefined;
+        nextOffset?: undefined;
     } | {
         jobs: {
             matchScore: number;
@@ -41,6 +45,10 @@ export declare class JobsController {
         fetchedCount: number;
         matchedCount: number;
         homeMatchCount: number;
+        limit: number;
+        offset: number;
+        hasMore: boolean;
+        nextOffset: number;
         diagnostic: string;
     }>;
     getApplications(email: string): Promise<Record<string, unknown>[]>;

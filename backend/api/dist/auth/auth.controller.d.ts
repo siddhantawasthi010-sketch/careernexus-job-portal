@@ -42,6 +42,9 @@ export declare class AuthController {
     }): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;
+    getProfile(email: string): Promise<{
+        user: import("../database/database.service").StoredUser;
+    }>;
     updateProfilePhoto(body: {
         email: string;
         photo: string;

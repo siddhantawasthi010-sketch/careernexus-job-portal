@@ -7,6 +7,22 @@ export interface StoredUser {
     profile: Record<string, unknown>;
     updated_at: string;
 }
+export interface ConnectPersonRecord {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+    headline: string;
+    company: string;
+}
+export interface ConnectionRequestRecord {
+    id: string;
+    requester_user_id: string;
+    recipient_user_id: string;
+    status: 'pending' | 'accepted' | 'declined';
+    created_at: string;
+    updated_at: string;
+}
 export interface StoredOtp {
     otp_hash: string;
     role: UserRole;
@@ -65,6 +81,33 @@ export declare class DatabaseService {
     private readonly client;
     constructor();
     getUserByEmail(email: string): Promise<StoredUser | null>;
+    private getConnectIdentity;
+    private toConnectPerson;
+    private getConnectionRequestsForUser;
+    searchConnectPeople(email: string, role: UserRole, query: string): Promise<{
+        connectionState: string;
+        requestId: string;
+        id: string;
+        name: string;
+        email: string;
+        role: UserRole;
+        headline: string;
+        company: string;
+    }[]>;
+    getConnectionOverview(email: string): Promise<{
+        incoming: any[];
+        outgoing: any[];
+        connections: any[];
+    }>;
+    createConnectionRequest(email: string, targetEmail: string): Promise<{
+        request: ConnectionRequestRecord;
+        state: "connected";
+    } | {
+        request: ConnectionRequestRecord;
+        state: "sent" | "received";
+    }>;
+    respondToConnectionRequest(email: string, requestId: string, status: 'accepted' | 'declined'): Promise<ConnectionRequestRecord>;
+    getCandidateJobSearchProfiles(): Promise<Record<string, unknown>[]>;
     upsertUser(user: {
         email: string;
         name: string;
@@ -104,6 +147,7 @@ export declare class DatabaseService {
     getJobs(featured?: boolean): Promise<JobRecord[]>;
     getCareerPortals(): Promise<CareerPortalRecord[]>;
     saveFeedJobs(jobs: FeedJobRecord[]): Promise<void>;
+    deleteStaleFeedJobs(source: string, fetchedAfter: string): Promise<void>;
     getRecentFeedJobs(): Promise<FeedJobRecord[]>;
     getUserJobApplications(email: string): Promise<Record<string, unknown>[]>;
     applyUserToJob(email: string, job: Record<string, unknown>): Promise<{
@@ -114,4 +158,5 @@ export declare class DatabaseService {
     }>;
     getLibraryTopics(): Promise<LibraryTopicRecord[]>;
     getCourses(): Promise<CourseRecord[]>;
+    addMissingJobLearningContent(topics: Omit<LibraryTopicRecord, 'id'>[], courses: Omit<CourseRecord, 'id'>[]): Promise<void>;
 }

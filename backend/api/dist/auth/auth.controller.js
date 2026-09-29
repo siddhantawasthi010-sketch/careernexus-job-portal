@@ -32,6 +32,9 @@ let AuthController = class AuthController {
     updateProfile(body) {
         return this.authService.updateProfile(body.email, body.profile);
     }
+    getProfile(email) {
+        return this.authService.getProfile(email);
+    }
     updateProfilePhoto(body) {
         return this.authService.updateProfilePhoto(body.email, body.photo);
     }
@@ -76,6 +79,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "updateProfile", null);
+__decorate([
+    (0, common_1.Get)('profile'),
+    __param(0, (0, common_1.Query)('email')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "getProfile", null);
 __decorate([
     (0, common_1.Put)('profile/photo'),
     __param(0, (0, common_1.Body)()),

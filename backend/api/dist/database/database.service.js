@@ -78,6 +78,170 @@ let DatabaseService = class DatabaseService {
             },
         };
     }
+    async getConnectIdentity(email) {
+        const { data, error } = await this.client.from('users').select('id, email, name').eq('email', email.trim().toLowerCase()).maybeSingle();
+        if (error)
+            throw new Error(`Unable to load connection account: ${error.message}`);
+        return data;
+    }
+    toConnectPerson(user) {
+        const profile = user.profile && typeof user.profile === 'object' ? user.profile : {};
+        const employmentDetails = Array.isArray(profile.employmentDetails)
+            ? profile.employmentDetails.filter((entry) => Boolean(entry) && typeof entry === 'object')
+            : [];
+        const currentEmployment = employmentDetails.find((entry) => entry.isCurrent) || employmentDetails[0] || {};
+        const email = String(user.email || '');
+        return {
+            id: String(user.id),
+            name: String(user.name || profile.name || email.split('@')[0] || 'CareerNexus member'),
+            email,
+            role: user.role === 'recruiter' ? 'recruiter' : 'candidate',
+            headline: String(profile.headline || profile.currentlyWorkingAs || profile.currentRole || profile.currentJobTitle || ''),
+            company: String(profile.companyName || profile.currentCompany || currentEmployment.companyName || ''),
+        };
+    }
+    async getConnectionRequestsForUser(userId) {
+        const { data, error } = await this.client
+            .from('user_connection_requests')
+            .select('id, requester_user_id, recipient_user_id, status, created_at, updated_at')
+            .or(`requester_user_id.eq.${userId},recipient_user_id.eq.${userId}`)
+            .order('updated_at', { ascending: false });
+        if (error)
+            throw new Error(`Unable to load connection requests: ${error.message}`);
+        return (data || []);
+    }
+    async searchConnectPeople(email, role, query) {
+        const currentUser = await this.getConnectIdentity(email);
+        if (!currentUser)
+            throw new Error('The signed-in account could not be found.');
+        const normalizedQuery = query.trim().toLowerCase();
+        if (normalizedQuery.length < 2)
+            return [];
+        const matches = [];
+        const pageSize = 500;
+        for (let offset = 0;; offset += pageSize) {
+            const { data, error } = await this.client.from('users')
+                .select('id, name, email, role, profile')
+                .eq('role', role)
+                .neq('id', currentUser.id)
+                .order('name', { ascending: true })
+                .range(offset, offset + pageSize - 1);
+            if (error)
+                throw new Error(`Unable to search ${role}s: ${error.message}`);
+            const page = (data || []);
+            for (const user of page) {
+                const person = this.toConnectPerson(user);
+                if ([person.name, person.email, person.company, person.headline].some((value) => value.toLowerCase().includes(normalizedQuery))) {
+                    matches.push(user);
+                }
+                if (matches.length >= 30)
+                    break;
+            }
+            if (matches.length >= 30 || page.length < pageSize)
+                break;
+        }
+        const people = matches.map((user) => this.toConnectPerson(user));
+        const requests = await this.getConnectionRequestsForUser(currentUser.id);
+        const relationByPerson = new Map();
+        for (const request of requests) {
+            const personId = request.requester_user_id === currentUser.id ? request.recipient_user_id : request.requester_user_id;
+            const previous = relationByPerson.get(personId);
+            if (!previous || request.status === 'accepted' || (request.status === 'pending' && previous.status === 'declined'))
+                relationByPerson.set(personId, request);
+        }
+        return people.map((person) => {
+            const relation = relationByPerson.get(person.id);
+            const state = relation?.status === 'accepted'
+                ? 'connected'
+                : relation?.status === 'pending'
+                    ? relation.requester_user_id === currentUser.id ? 'sent' : 'received'
+                    : null;
+            return { ...person, connectionState: state, requestId: state === 'received' ? relation?.id : null };
+        });
+    }
+    async getConnectionOverview(email) {
+        const currentUser = await this.getConnectIdentity(email);
+        if (!currentUser)
+            throw new Error('The signed-in account could not be found.');
+        const requests = await this.getConnectionRequestsForUser(currentUser.id);
+        const otherIds = Array.from(new Set(requests.map((request) => request.requester_user_id === currentUser.id ? request.recipient_user_id : request.requester_user_id)));
+        const peopleById = new Map();
+        if (otherIds.length) {
+            const { data, error } = await this.client.from('users').select('id, name, email, role, profile').in('id', otherIds);
+            if (error)
+                throw new Error(`Unable to load connection profiles: ${error.message}`);
+            for (const user of (data || []))
+                peopleById.set(String(user.id), this.toConnectPerson(user));
+        }
+        const incoming = [];
+        const outgoing = [];
+        const connections = [];
+        for (const request of requests) {
+            const isRequester = request.requester_user_id === currentUser.id;
+            const person = peopleById.get(isRequester ? request.recipient_user_id : request.requester_user_id);
+            if (!person)
+                continue;
+            const entry = { requestId: request.id, person, createdAt: request.created_at };
+            if (request.status === 'accepted')
+                connections.push({ ...entry, connectedAt: request.updated_at });
+            else if (request.status === 'pending' && isRequester)
+                outgoing.push(entry);
+            else if (request.status === 'pending')
+                incoming.push(entry);
+        }
+        return { incoming, outgoing, connections };
+    }
+    async createConnectionRequest(email, targetEmail) {
+        const requester = await this.getConnectIdentity(email);
+        const recipient = await this.getConnectIdentity(targetEmail);
+        if (!requester || !recipient)
+            throw new Error('The selected account could not be found.');
+        if (requester.id === recipient.id)
+            throw new Error('You cannot connect with your own account.');
+        const currentRequests = await this.getConnectionRequestsForUser(requester.id);
+        const existingRelation = currentRequests.find((request) => ((request.requester_user_id === requester.id && request.recipient_user_id === recipient.id)
+            || (request.requester_user_id === recipient.id && request.recipient_user_id === requester.id)));
+        if (existingRelation?.status === 'accepted')
+            return { request: existingRelation, state: 'connected' };
+        if (existingRelation?.status === 'pending') {
+            return { request: existingRelation, state: existingRelation.requester_user_id === requester.id ? 'sent' : 'received' };
+        }
+        const now = new Date().toISOString();
+        const { data, error } = await this.client.from('user_connection_requests').upsert({
+            requester_user_id: requester.id,
+            recipient_user_id: recipient.id,
+            status: 'pending',
+            updated_at: now,
+        }, { onConflict: 'requester_user_id,recipient_user_id' })
+            .select('id, requester_user_id, recipient_user_id, status, created_at, updated_at')
+            .single();
+        if (error)
+            throw new Error(`Unable to send connection request: ${error.message}`);
+        return { request: data, state: 'sent' };
+    }
+    async respondToConnectionRequest(email, requestId, status) {
+        const currentUser = await this.getConnectIdentity(email);
+        if (!currentUser)
+            throw new Error('The signed-in account could not be found.');
+        const { data, error } = await this.client.from('user_connection_requests')
+            .update({ status, updated_at: new Date().toISOString() })
+            .eq('id', requestId)
+            .eq('recipient_user_id', currentUser.id)
+            .eq('status', 'pending')
+            .select('id, requester_user_id, recipient_user_id, status, created_at, updated_at')
+            .maybeSingle();
+        if (error)
+            throw new Error(`Unable to update connection request: ${error.message}`);
+        if (!data)
+            throw new Error('This pending request could not be found for your account.');
+        return data;
+    }
+    async getCandidateJobSearchProfiles() {
+        const { data, error } = await this.client.from('users').select('profile').eq('role', 'candidate');
+        if (error)
+            throw new Error(`Unable to load candidate search profiles: ${error.message}`);
+        return (data || []).map((user) => (user.profile || {}));
+    }
     async upsertUser(user) {
         const { data, error } = await this.client
             .from('users')
@@ -335,6 +499,15 @@ let DatabaseService = class DatabaseService {
                 throw new Error(`Unable to cache fetched jobs: ${error.message}`);
         }
     }
+    async deleteStaleFeedJobs(source, fetchedAfter) {
+        const { error } = await this.client
+            .from('job_feed_items')
+            .delete()
+            .eq('source', source)
+            .lt('fetched_at', fetchedAfter);
+        if (error)
+            throw new Error(`Unable to remove stale ${source} jobs: ${error.message}`);
+    }
     async getRecentFeedJobs() {
         const fetchedAfter = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const pageSize = 1000;
@@ -449,6 +622,34 @@ let DatabaseService = class DatabaseService {
             throw new Error(`Unable to load courses: ${error.message}`);
         }
         return (data || []);
+    }
+    async addMissingJobLearningContent(topics, courses) {
+        if (topics.length) {
+            const topicRows = topics.map((topic) => ({
+                name: topic.name,
+                brief_description: topic.briefDescription,
+                explanation: topic.explanation,
+                example: topic.example,
+                is_active: true,
+            }));
+            const { error } = await this.client.from('library_topics').upsert(topicRows, { onConflict: 'name', ignoreDuplicates: true });
+            if (error)
+                throw new Error(`Unable to add job-skill library topics: ${error.message}`);
+        }
+        if (courses.length) {
+            const courseRows = courses.map((course) => ({
+                title: course.title,
+                topic: course.topic,
+                provider: course.provider,
+                level: course.level,
+                duration: course.duration,
+                url: course.url,
+                is_active: true,
+            }));
+            const { error } = await this.client.from('courses').upsert(courseRows, { onConflict: 'title', ignoreDuplicates: true });
+            if (error)
+                throw new Error(`Unable to add job-skill courses: ${error.message}`);
+        }
     }
 };
 exports.DatabaseService = DatabaseService;

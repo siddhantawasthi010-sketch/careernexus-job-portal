@@ -23,6 +23,7 @@ import {
 
 const STORAGE_KEY = 'jobportal_user_profile_status';
 const ACCOUNT_EMAIL_KEY = 'jobportal_account_email';
+const SESSION_PROFILE_KEY = 'jobportal_session_profile';
 
 const getSalaryInputValue = (value = '') => value.replace(/^(INR|₹)\s*/i, '');
 
@@ -62,6 +63,8 @@ const defaultProfile = {
   location: '',
   preferredJobRole: '',
   preferredCity: '',
+  expectedSalaryLpa: '',
+  totalExperienceYears: '',
   jobType: '',
   employmentType: '',
   preferredShift: '',
@@ -71,10 +74,11 @@ const defaultProfile = {
 };
 
 const tabs = ['Applied Jobs', 'Recommended Jobs'];
+const JOB_RECOMMENDATION_PAGE_SIZE = 12;
 const navigationItems = [
   { label: 'Home', icon: 'home-outline', activeIcon: 'home' },
   { label: 'Apply', icon: 'paper-plane-outline' },
-  { label: 'Profile', icon: 'person-outline' },
+  { label: 'Connect', icon: 'people-outline' },
   { label: 'Library', icon: 'library-outline' },
   { label: 'Courses', icon: 'school-outline' },
 ];
@@ -416,7 +420,7 @@ function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit 
             {field('Current industry', 'currentIndustry', form, updateField)}{field('Department', 'department', form, updateField)}{field('Current role', 'currentRole', form, updateField)}{field('Current job title', 'currentJobTitle', form, updateField)}{dropdownField('Notice period', 'noticePeriod', noticePeriodOptions)}{field('DOB', 'dateOfBirth', form, updateField, { placeholder: 'YYYY-MM-DD' })}{field('Address', 'address', form, updateField, { multiline: true })}
           </>, null, 'professionalInfo')}
           {section('Career Preferences', <>
-            {field('Preferred job role', 'preferredJobRole', form, updateField)}<PreferredCitiesField value={form.preferredCity} error={preferredCityError} onChange={(value) => { updateField('preferredCity', value); setPreferredCityError(''); }} />{choiceField('Job type', 'jobType', ['Permanent', 'Contractual'])}{choiceField('Employment type', 'employmentType', ['Full Time', 'Part Time'])}{choiceField('Preferred shift', 'preferredShift', ['Day', 'Night', 'Rotational'])}
+            {field('Preferred job role', 'preferredJobRole', form, updateField)}<PreferredCitiesField value={form.preferredCity} error={preferredCityError} onChange={(value) => { updateField('preferredCity', value); setPreferredCityError(''); }} />{field('Expected salary (INR LPA)', 'expectedSalaryLpa', form, updateField, { keyboardType: 'decimal-pad' })}{field('Total experience (years)', 'totalExperienceYears', form, updateField, { keyboardType: 'decimal-pad' })}{choiceField('Job type', 'jobType', ['Permanent', 'Contractual'])}{choiceField('Employment type', 'employmentType', ['Full Time', 'Part Time'])}{choiceField('Preferred shift', 'preferredShift', ['Day', 'Night', 'Rotational'])}
           </>, null, 'careerPreferences')}
           {section('Key Skills Set', <>
             <View style={styles.skillEntry}><TextInput style={[styles.input, styles.profileInput, styles.skillInput]} value={skillInput} onChangeText={setSkillInput} onSubmitEditing={addSkill} placeholder="Add a skill" placeholderTextColor="#94a3b8" /><TouchableOpacity style={styles.addButton} onPress={addSkill}><Ionicons name="add" size={22} color="#fff" /></TouchableOpacity></View>
@@ -459,12 +463,19 @@ function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit 
 }
 
 function LibraryTopics({ topics }) {
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeLetter, setActiveLetter] = useState('All');
   const [expandedTopics, setExpandedTopics] = useState(new Set());
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
   const availableLetters = new Set(topics.map((topic) => topic.name.charAt(0).toUpperCase()));
   const filteredTopics = topics.filter((topic) => {
-    return activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
+    const matchesLetter = activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
+    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.example]
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedQuery);
+    return matchesLetter && matchesSearch;
   });
 
   const toggleTopic = (topicName) => {
@@ -485,6 +496,9 @@ function LibraryTopics({ topics }) {
         </View>
         <Text style={styles.topicCount}>{filteredTopics.length} topics</Text>
       </View>
+
+      <Text style={styles.librarySearchLabel}>Search topics</Text>
+      <TextInput style={styles.librarySearch} value={searchQuery} onChangeText={setSearchQuery} placeholder="Search by topic, concept, or example" placeholderTextColor="#94a3b8" />
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.alphabetScroll} contentContainerStyle={styles.alphabetFilter}>
         <TouchableOpacity style={[styles.alphabetButton, activeLetter === 'All' && styles.alphabetButtonActive]} onPress={() => setActiveLetter('All')}>
@@ -560,6 +574,16 @@ function LibraryView() {
 }
 
 function CoursesList({ courses }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeLetter, setActiveLetter] = useState('All');
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const filteredCourses = courses.filter((course) => (
+    (activeLetter === 'All' || course.title.toUpperCase().startsWith(activeLetter))
+    && [course.title, course.topic, course.provider, course.level, course.duration].join(' ').toLowerCase().includes(normalizedQuery)
+  ));
+  const availableLetters = new Set(courses.map((course) => course.title.charAt(0).toUpperCase()));
+
   return (
     <View style={styles.coursesSection}>
       <Text style={styles.coursesEyebrow}>LEARNING PATHS</Text>
@@ -568,10 +592,20 @@ function CoursesList({ courses }) {
           <Text style={styles.coursesTitle}>Online courses</Text>
           <Text style={styles.coursesIntro}>Practical courses for testing topics and skills commonly listed in job descriptions.</Text>
         </View>
-        <Text style={styles.courseCount}>{courses.length} courses</Text>
+        <Text style={styles.courseCount}>{filteredCourses.length} courses</Text>
       </View>
 
-      {courses.map((course) => (
+      <Text style={styles.librarySearchLabel}>Search courses</Text>
+      <TextInput style={styles.librarySearch} value={searchQuery} onChangeText={setSearchQuery} placeholder="Search by skill, topic, or provider" placeholderTextColor="#94a3b8" />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.alphabetScroll} contentContainerStyle={styles.alphabetFilter}>
+        <TouchableOpacity style={[styles.alphabetButton, activeLetter === 'All' && styles.alphabetButtonActive]} onPress={() => setActiveLetter('All')}><Text style={[styles.alphabetButtonText, activeLetter === 'All' && styles.alphabetButtonTextActive]}>All</Text></TouchableOpacity>
+        {alphabet.map((letter) => {
+          const isAvailable = availableLetters.has(letter);
+          return <TouchableOpacity key={letter} style={[styles.alphabetButton, activeLetter === letter && styles.alphabetButtonActive, !isAvailable && styles.alphabetButtonDisabled]} onPress={() => setActiveLetter(letter)} disabled={!isAvailable}><Text style={[styles.alphabetButtonText, activeLetter === letter && styles.alphabetButtonTextActive, !isAvailable && styles.alphabetButtonTextDisabled]}>{letter}</Text></TouchableOpacity>;
+        })}
+      </ScrollView>
+
+      {filteredCourses.map((course) => (
         <View key={course.title} style={styles.courseCard}>
           <View style={styles.courseCardHeader}>
             <View style={styles.courseTitleBlock}>
@@ -591,7 +625,7 @@ function CoursesList({ courses }) {
         </View>
       ))}
 
-      {courses.length === 0 && <Text style={styles.emptyLibrary}>No courses available.</Text>}
+      {filteredCourses.length === 0 && <Text style={styles.emptyLibrary}>{courses.length ? `No courses match “${searchQuery}”.` : 'No courses available.'}</Text>}
     </View>
   );
 }
@@ -622,6 +656,153 @@ function CoursesView() {
   if (error) return <View style={styles.libraryStatus}><Text style={styles.libraryStatusError}>{error}</Text></View>;
 
   return <CoursesList courses={courseList} />;
+}
+
+function ConnectView({ email }) {
+  const [targetRole, setTargetRole] = useState('candidate');
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [overview, setOverview] = useState({ incoming: [], outgoing: [], connections: [] });
+  const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingOverview, setIsLoadingOverview] = useState(true);
+  const [processingId, setProcessingId] = useState('');
+  const [error, setError] = useState('');
+
+  const loadOverview = async () => {
+    const response = await fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Unable to load connections.');
+    setOverview(data);
+  };
+
+  useEffect(() => {
+    let isActive = true;
+    setIsLoadingOverview(true);
+    fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load connections.');
+        if (isActive) setOverview(data);
+      })
+      .catch((loadError) => { if (isActive) setError(loadError.message || 'Unable to load connections.'); })
+      .finally(() => { if (isActive) setIsLoadingOverview(false); });
+    return () => { isActive = false; };
+  }, [email]);
+
+  useEffect(() => {
+    const searchText = query.trim();
+    if (searchText.length < 2) {
+      setSuggestions([]);
+      setIsSearching(false);
+      return undefined;
+    }
+    let isActive = true;
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const params = new URLSearchParams({ email, role: targetRole, q: searchText });
+        const response = await fetch(`${getApiBaseUrl()}/connect/search?${params}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to search members.');
+        if (isActive) setSuggestions(Array.isArray(data) ? data : []);
+      } catch (searchError) {
+        if (isActive) setError(searchError.message || 'Unable to search members.');
+      } finally {
+        if (isActive) setIsSearching(false);
+      }
+    }, 250);
+    return () => { isActive = false; clearTimeout(timer); };
+  }, [email, query, targetRole]);
+
+  const sendRequest = async (person) => {
+    setProcessingId(person.id);
+    setError('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, targetEmail: person.email }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to send the request.');
+      setSuggestions((current) => current.map((item) => item.id === person.id ? { ...item, connectionState: data.state, requestId: data.state === 'received' ? data.request?.id : null } : item));
+      await loadOverview();
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to send the request.');
+    } finally {
+      setProcessingId('');
+    }
+  };
+
+  const respondToRequest = async (requestId, status) => {
+    setProcessingId(requestId);
+    setError('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/requests/${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, status }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to update this request.');
+      await loadOverview();
+      setSuggestions((current) => current.map((person) => person.id === data.requester_user_id ? { ...person, connectionState: status === 'accepted' ? 'connected' : null } : person));
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to update this request.');
+    } finally {
+      setProcessingId('');
+    }
+  };
+
+  const renderPerson = (person, actions = null, requestId = person.id) => <View style={styles.connectPerson} key={requestId}>
+    <View style={styles.connectPersonDetails}>
+      <Text style={styles.connectPersonName}>{person.name}</Text>
+      <Text style={styles.connectPersonMeta}>{person.email}</Text>
+      {person.headline ? <Text style={styles.connectPersonMeta}>{person.headline}</Text> : null}
+      {person.company ? <Text style={styles.connectPersonMeta}>{person.company}</Text> : null}
+    </View>
+    {actions}
+  </View>;
+
+  return <View style={styles.connectView}>
+    <Text style={styles.connectEyebrow}>NETWORK</Text>
+    <Text style={styles.connectTitle}>Connect</Text>
+    <Text style={styles.connectIntro}>Find candidates and recruiters, send requests, and manage your connections.</Text>
+    <View style={styles.connectRoleSwitch}>
+      {['candidate', 'recruiter'].map((role) => <TouchableOpacity key={role} style={[styles.connectRoleButton, targetRole === role && styles.connectRoleButtonActive]} onPress={() => setTargetRole(role)} accessibilityRole="tab" accessibilityState={{ selected: targetRole === role }}><Text style={[styles.connectRoleText, targetRole === role && styles.connectRoleTextActive]}>{role === 'candidate' ? 'Candidates' : 'Recruiters'}</Text></TouchableOpacity>)}
+    </View>
+    <Text style={styles.connectSearchLabel}>Search {targetRole === 'candidate' ? 'candidates' : 'recruiters'}</Text>
+    <TextInput style={styles.connectSearchInput} value={query} onChangeText={setQuery} placeholder="Name, email, or company" placeholderTextColor="#94a3b8" autoCapitalize="none" accessibilityLabel={`Search ${targetRole}s by name, email, or company`} />
+    {query.trim().length >= 2 ? <View style={styles.connectSuggestions}>
+      {isSearching ? <Text style={styles.connectEmpty}>Searching...</Text> : suggestions.length ? suggestions.map((person) => {
+        const isProcessing = processingId === person.id;
+        const label = isProcessing ? 'Sending...' : person.connectionState === 'connected' ? 'Connected' : person.connectionState === 'sent' ? 'Request Sent' : person.connectionState === 'received' ? 'Request Received' : 'Connect';
+        return renderPerson(person, <TouchableOpacity style={[styles.connectAction, person.connectionState && styles.connectActionDisabled]} onPress={() => sendRequest(person)} disabled={isProcessing || person.connectionState !== null}><Text style={[styles.connectActionText, person.connectionState && styles.connectActionTextDisabled]}>{label}</Text></TouchableOpacity>);
+      }) : <Text style={styles.connectEmpty}>No matching {targetRole}s.</Text>}
+    </View> : null}
+    {error ? <Text style={styles.connectError}>{error}</Text> : null}
+
+    <View style={styles.connectLists}>
+      <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Incoming requests ({overview.incoming.length})</Text>
+        {overview.incoming.map((request) => renderPerson(request.person, <View style={styles.connectActionGroup}>
+          <TouchableOpacity style={styles.connectAction} onPress={() => respondToRequest(request.requestId, 'accepted')} disabled={processingId === request.requestId}><Text style={styles.connectActionText}>{processingId === request.requestId ? 'Saving...' : 'Accept'}</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.connectSecondaryAction} onPress={() => respondToRequest(request.requestId, 'declined')} disabled={processingId === request.requestId}><Text style={styles.connectSecondaryActionText}>Decline</Text></TouchableOpacity>
+        </View>, request.requestId))}
+        {!isLoadingOverview && !overview.incoming.length ? <Text style={styles.connectEmpty}>No incoming requests.</Text> : null}
+      </View>
+      <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Connections ({overview.connections.length})</Text>
+        {overview.connections.map((connection) => renderPerson(connection.person, <Text style={styles.connectStatus}>Connected</Text>, connection.requestId))}
+        {!isLoadingOverview && !overview.connections.length ? <Text style={styles.connectEmpty}>Approved connections will appear here.</Text> : null}
+      </View>
+      <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Requests sent ({overview.outgoing.length})</Text>
+        {overview.outgoing.map((request) => renderPerson(request.person, <Text style={styles.connectStatus}>Request Sent</Text>, request.requestId))}
+        {!isLoadingOverview && !overview.outgoing.length ? <Text style={styles.connectEmpty}>No pending requests sent.</Text> : null}
+      </View>
+    </View>
+  </View>;
 }
 
 function ProfileDetailsSection({ title, fields, children, onEdit }) {
@@ -693,7 +874,7 @@ function MobileJobCard({ job, isApplied, onApply }) {
       <View style={styles.jobTitleBlock}><Text style={styles.jobTitle}>{job.title}</Text><Text style={styles.jobCompany}>{job.company}</Text></View>
       <Text style={styles.jobMatchBadge}>{job.matchScore}% shortlist</Text>
     </View>
-    <View style={styles.jobMetaRow}><Text style={styles.jobMeta}>{job.location || 'Location not listed'}</Text><Text style={styles.jobMeta}>{job.type || 'Type not listed'}</Text></View>
+    <View style={styles.jobMetaRow}><Text style={[styles.jobMeta, styles.jobLocation]} numberOfLines={1} ellipsizeMode="tail" accessibilityLabel={job.location || 'Location not listed'}>{job.location || 'Location not listed'}</Text><Text style={[styles.jobMeta, styles.jobType]} numberOfLines={1} ellipsizeMode="tail" accessibilityLabel={job.type || 'Type not listed'}>{job.type || 'Type not listed'}</Text></View>
     <View style={styles.jobActions}>
       <TouchableOpacity style={styles.jobViewButton} onPress={() => Linking.openURL(job.url)}><Text style={styles.jobViewButtonText}>View listing</Text></TouchableOpacity>
       {isApplied ? <Text style={styles.jobAppliedStatus}>Applied</Text> : <TouchableOpacity style={styles.jobApplyButton} onPress={() => onApply(job)}><Text style={styles.jobApplyButtonText}>Apply</Text></TouchableOpacity>}
@@ -711,6 +892,9 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
   const [careerPortals, setCareerPortals] = useState([]);
   const [jobFeedStatus, setJobFeedStatus] = useState(null);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
+  const [hasMoreRecommendations, setHasMoreRecommendations] = useState(false);
+  const [isLoadingMoreRecommendations, setIsLoadingMoreRecommendations] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState('');
   const [jobsError, setJobsError] = useState('');
 
   const handleJobSearchChange = (value) => {
@@ -727,28 +911,56 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
     setIsLoadingJobs(true);
     setJobsError('');
     setJobFeedStatus(null);
-    Promise.all([
-      fetch(`${getApiBaseUrl()}/jobs/recommendations?email=${encodeURIComponent(email)}`),
-      fetch(`${getApiBaseUrl()}/jobs/applications?email=${encodeURIComponent(email)}`),
-      fetch(`${getApiBaseUrl()}/jobs/career-portals`),
-    ]).then(async ([recommendationResponse, applicationResponse, portalResponse]) => {
-      const [recommendationData, applicationData, portalData] = await Promise.all([recommendationResponse.json(), applicationResponse.json(), portalResponse.json()]);
-      if (!recommendationResponse.ok) throw new Error(recommendationData.message || 'Unable to load job recommendations.');
-      if (!applicationResponse.ok) throw new Error(applicationData.message || 'Unable to load applied jobs.');
-      if (!portalResponse.ok) throw new Error(portalData.message || 'Unable to load company career portals.');
+    setRecommendations([]);
+    setHasMoreRecommendations(false);
+    fetch(`${getApiBaseUrl()}/jobs/recommendations?email=${encodeURIComponent(email)}&limit=${JOB_RECOMMENDATION_PAGE_SIZE}&offset=0`).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to load job recommendations.');
       if (isActive) {
-        setRecommendations(Array.isArray(recommendationData.jobs) ? recommendationData.jobs : []);
-        setAppliedJobs(Array.isArray(applicationData) ? applicationData : []);
-        setCareerPortals(Array.isArray(portalData) ? portalData : []);
-        setJobFeedStatus({ diagnostic: recommendationData.diagnostic || '', sourcesFailed: Array.isArray(recommendationData.sourcesFailed) ? recommendationData.sourcesFailed : [] });
+        setRecommendations(Array.isArray(data.jobs) ? data.jobs : []);
+        setHasMoreRecommendations(Boolean(data.hasMore));
+        setJobFeedStatus({ diagnostic: data.diagnostic || '', sourcesFailed: Array.isArray(data.sourcesFailed) ? data.sourcesFailed : [] });
       }
     }).catch((error) => {
       if (isActive) setJobsError(error.message || 'Unable to load jobs.');
     }).finally(() => {
       if (isActive) setIsLoadingJobs(false);
     });
+    Promise.all([
+      fetch(`${getApiBaseUrl()}/jobs/applications?email=${encodeURIComponent(email)}`).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load applied jobs.');
+        if (isActive) setAppliedJobs(Array.isArray(data) ? data : []);
+      }),
+      fetch(`${getApiBaseUrl()}/jobs/career-portals`).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load company career portals.');
+        if (isActive) setCareerPortals(Array.isArray(data) ? data : []);
+      }),
+    ]).catch((error) => {
+      if (isActive) console.warn('Unable to load applications or career portals:', error);
+    });
     return () => { isActive = false; };
   }, [email]);
+
+  const loadMoreRecommendations = async () => {
+    if (isLoadingMoreRecommendations || !hasMoreRecommendations) return;
+    setIsLoadingMoreRecommendations(true);
+    setLoadMoreError('');
+    try {
+      const offset = recommendations.length;
+      const response = await fetch(`${getApiBaseUrl()}/jobs/recommendations?email=${encodeURIComponent(email)}&limit=${JOB_RECOMMENDATION_PAGE_SIZE}&offset=${offset}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to load more job recommendations.');
+      const nextJobs = Array.isArray(data.jobs) ? data.jobs : [];
+      setRecommendations((currentJobs) => [...currentJobs, ...nextJobs.filter((job) => !currentJobs.some((currentJob) => currentJob.id === job.id))]);
+      setHasMoreRecommendations(Boolean(data.hasMore));
+    } catch (error) {
+      setLoadMoreError(error.message || 'Unable to load more jobs.');
+    } finally {
+      setIsLoadingMoreRecommendations(false);
+    }
+  };
 
   const appliedIds = new Set(appliedJobs.map((job) => job.id));
   const matchingJobs = recommendations.filter((job) => job.matchScore > 0 && !appliedIds.has(job.id));
@@ -804,9 +1016,15 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
       <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.logoutButton} onPress={onLogout}>
-            <Text style={styles.logoutButtonText}>Log out</Text>
-          </TouchableOpacity>
+          <Image source={require('./assets/companylogo-after-login.png')} style={styles.dashboardLogo} resizeMode="contain" accessibilityLabel="CareerNexus" />
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={[styles.profileHeaderButton, activeNav === 'Profile' && styles.profileHeaderButtonActive]} onPress={() => setActiveNav('Profile')} accessibilityRole="button" accessibilityLabel="Profile" accessibilityState={{ selected: activeNav === 'Profile' }}>
+              <Ionicons name="person-outline" size={19} color={activeNav === 'Profile' ? '#2563eb' : '#526779'} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.logoutIconButton} onPress={onLogout} accessibilityRole="button" accessibilityLabel="Log out">
+              <Ionicons name="log-out-outline" size={20} color="#b91c1c" />
+            </TouchableOpacity>
+          </View>
         </View>
         {(activeNav === 'Home' || activeNav === 'Apply') && <View style={styles.jobsSearchBox}>
           <Ionicons name="search-outline" size={18} color="#5b6d7b" />
@@ -861,6 +1079,8 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
           {jobFeedStatus?.sourcesFailed.map((failure) => <Text key={failure.source} style={styles.libraryStatusError}>{failure.source}: {failure.message}</Text>)}
           {!isLoadingJobs && !jobsError && homeJobs.length === 0 ? <Text style={styles.libraryStatusText}>{jobFeedStatus?.diagnostic || 'No verified job listings are currently available. View all for official employer career portals.'}</Text> : null}
           {homeJobs.map((job) => <MobileJobCard key={job.id} job={job} onApply={applyToJob} />)}
+          {loadMoreError ? <Text style={styles.libraryStatusError}>{loadMoreError}</Text> : null}
+          {hasMoreRecommendations ? <TouchableOpacity style={styles.secondaryButton} onPress={loadMoreRecommendations} disabled={isLoadingMoreRecommendations}><Text style={styles.secondaryButtonText}>{isLoadingMoreRecommendations ? 'Loading more jobs...' : 'Load more jobs'}</Text></TouchableOpacity> : null}
         </View>}
 
         {activeNav === 'Apply' && <View style={styles.jobsSection}>
@@ -883,6 +1103,8 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
           {jobFeedStatus?.sourcesFailed.map((failure) => <Text key={failure.source} style={styles.libraryStatusError}>{failure.source}: {failure.message}</Text>)}
           {!isLoadingJobs && !jobsError && filteredJobGroups[activeTab].length === 0 ? <Text style={styles.libraryStatusText}>{jobGroups[activeTab].length ? `No jobs match “${jobSearchQuery}”.` : activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : jobFeedStatus?.diagnostic || 'No verified job listings are currently available.'}</Text> : null}
           {!isLoadingJobs && !jobsError && filteredJobGroups[activeTab].map((job) => <MobileJobCard key={job.id} job={job} isApplied={activeTab === 'Applied Jobs'} onApply={applyToJob} />)}
+          {activeTab === 'Recommended Jobs' && loadMoreError ? <Text style={styles.libraryStatusError}>{loadMoreError}</Text> : null}
+          {activeTab === 'Recommended Jobs' && hasMoreRecommendations ? <TouchableOpacity style={styles.secondaryButton} onPress={loadMoreRecommendations} disabled={isLoadingMoreRecommendations}><Text style={styles.secondaryButtonText}>{isLoadingMoreRecommendations ? 'Loading more jobs...' : 'Load more jobs'}</Text></TouchableOpacity> : null}
           <View style={styles.careerPortalSection}>
             <Text style={styles.portalSectionTitle}>Official career portals</Text>
             <Text style={styles.jobsIntro}>Browse current vacancies directly on each employer's official site.</Text>
@@ -901,7 +1123,7 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
             ['Current industry', profile.currentIndustry], ['Department', profile.department], ['Current role', profile.currentRole], ['Current job title', profile.currentJobTitle], ['Notice period', profile.noticePeriod], ['DOB', profile.dateOfBirth], ['Address', profile.address],
           ]} onEdit={() => onEditProfileSection('professionalInfo')} />
           <ProfileDetailsSection title="Career Preferences" fields={[
-            ['Preferred job role', profile.preferredJobRole], ['Preferred city', profile.preferredCity], ['Job type', profile.jobType], ['Employment type', profile.employmentType], ['Preferred shift', profile.preferredShift],
+            ['Preferred job role', profile.preferredJobRole], ['Preferred city', profile.preferredCity], ['Expected salary (INR LPA)', profile.expectedSalaryLpa], ['Total experience (years)', profile.totalExperienceYears], ['Job type', profile.jobType], ['Employment type', profile.employmentType], ['Preferred shift', profile.preferredShift],
           ]} onEdit={() => onEditProfileSection('careerPreferences')} />
           <ProfileDetailsSection title="Key Skills Set" onEdit={() => onEditProfileSection('keySkillsSet')}><View style={styles.skillTiles}>{(profile.skills || []).map((skill) => <View style={styles.skillTile} key={skill}><Text style={styles.skillTileText}>{skill}</Text></View>)}</View></ProfileDetailsSection>
           <ProfileDetailsSection title="Employment Details" onEdit={() => onEditProfileSection('employmentDetails')}>{(profile.employmentDetails || []).map((employment, index) => <View style={styles.profileRecord} key={index}><Text style={styles.profileRecordTitle}>{employment.companyName || `Company ${index + 1}`}</Text><Text style={styles.profileRecordText}>{employment.jobTitle || 'Job title not added'} · {employment.employmentType || 'Employment type not added'} · CTC: {employment.ctc || 'Not added'}</Text><Text style={styles.profileRecordText}>{employment.joiningDate || 'Joining date not added'}{employment.isCurrent ? ' · Current' : employment.relievingDate ? ` to ${employment.relievingDate}` : ''}</Text><Text style={styles.profileRecordText}>Skills: {(employment.skills || []).join(', ') || 'Not added'} · Notice period: {employment.noticePeriod || 'Not added'}</Text><Text style={styles.profileRecordText}>{employment.jobProfile}</Text></View>)}{!profile.employmentDetails?.length && <Text style={styles.profileRecordText}>No employment details added.</Text>}</ProfileDetailsSection>
@@ -911,6 +1133,8 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
         {activeNav === 'Library' && <LibraryView />}
 
         {activeNav === 'Courses' && <CoursesView />}
+
+        {activeNav === 'Connect' && <ConnectView email={email} />}
       </ScrollView>
       <View style={styles.bottomNav}>
         {navigationItems.map((item) => {
@@ -942,17 +1166,35 @@ export default function App() {
   const [sectionToEdit, setSectionToEdit] = useState(null);
   const [landingNav, setLandingNav] = useState('Home');
 
+  const storeSessionProfile = async (nextProfile) => {
+    try {
+      await AsyncStorage.setItem(SESSION_PROFILE_KEY, JSON.stringify(nextProfile));
+    } catch (error) {
+      console.warn('Unable to cache the signed-in profile', error);
+    }
+  };
+
   useEffect(() => {
     const loadAppState = async () => {
       try {
-        const [stored, storedEmail] = await Promise.all([
+        const [stored, storedEmail, storedProfile] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEY),
           AsyncStorage.getItem(ACCOUNT_EMAIL_KEY),
+          AsyncStorage.getItem(SESSION_PROFILE_KEY),
         ]);
-        if (storedEmail) setUserEmail(storedEmail);
-        if (stored === 'existing-user') {
+        if (storedEmail && (stored === 'existing-user' || stored === 'new-user')) {
+          setUserEmail(storedEmail);
+          if (storedProfile) {
+            try {
+              setProfile({ ...defaultProfile, ...JSON.parse(storedProfile), email: storedEmail });
+            } catch (error) {
+              console.warn('Unable to restore the cached profile', error);
+            }
+          }
+        }
+        if (stored === 'existing-user' && storedEmail) {
           setScreen('landing');
-        } else if (stored === 'new-user') {
+        } else if (stored === 'new-user' && storedEmail) {
           setScreen('profile-form');
         }
       } catch (error) {
@@ -964,6 +1206,30 @@ export default function App() {
 
     loadAppState();
   }, []);
+
+  useEffect(() => {
+    if (!userEmail) return undefined;
+    let isActive = true;
+    fetch(`${getApiBaseUrl()}/auth/profile?email=${encodeURIComponent(userEmail)}`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to refresh the saved profile.');
+        return data.user;
+      })
+      .then(async (user) => {
+        if (!isActive || !user) return;
+        const restoredProfile = {
+          ...defaultProfile,
+          ...(user.profile || {}),
+          email: user.email || userEmail,
+          updatedAt: user.updated_at || null,
+        };
+        setProfile(restoredProfile);
+        await storeSessionProfile(restoredProfile);
+      })
+      .catch((error) => console.warn('Unable to refresh the saved profile; keeping the local copy.', error));
+    return () => { isActive = false; };
+  }, [userEmail]);
 
   useEffect(() => {
     if (!userEmail) return undefined;
@@ -993,11 +1259,20 @@ export default function App() {
 
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem(STORAGE_KEY);
-      await AsyncStorage.removeItem(ACCOUNT_EMAIL_KEY);
-      setScreen('login');
+      await Promise.all([
+        AsyncStorage.removeItem(STORAGE_KEY),
+        AsyncStorage.removeItem(ACCOUNT_EMAIL_KEY),
+        AsyncStorage.removeItem(SESSION_PROFILE_KEY),
+      ]);
     } catch (error) {
       console.warn('Unable to clear user state', error);
+    } finally {
+      setProfile(defaultProfile);
+      setUserEmail('');
+      setIsEditingProfile(false);
+      setSectionToEdit(null);
+      setLandingNav('Home');
+      setScreen('login');
     }
   };
 
@@ -1015,7 +1290,9 @@ export default function App() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Unable to update profile picture.');
-    setProfile((currentProfile) => ({ ...currentProfile, photo, updatedAt: data.user?.updated_at || currentProfile.updatedAt }));
+    const nextProfile = { ...profile, photo, updatedAt: data.user?.updated_at || profile.updatedAt };
+    setProfile(nextProfile);
+    await storeSessionProfile(nextProfile);
   };
 
   const uploadResume = async (file) => {
@@ -1031,7 +1308,9 @@ export default function App() {
     const response = await fetch(`${getApiBaseUrl()}/auth/profile/resume`, { method: 'POST', body: formData });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Unable to upload resume.');
-    setProfile((currentProfile) => ({ ...currentProfile, resume: data.resume, updatedAt: data.updated_at || currentProfile.updatedAt }));
+    const nextProfile = { ...profile, resume: data.resume, updatedAt: data.updated_at || profile.updatedAt };
+    setProfile(nextProfile);
+    await storeSessionProfile(nextProfile);
   };
 
   const applyToJob = async (job) => {
@@ -1066,18 +1345,19 @@ export default function App() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Unable to delete resume.');
-    setProfile((currentProfile) => {
-      const nextProfile = { ...currentProfile, updatedAt: data.updated_at || currentProfile.updatedAt };
-      delete nextProfile.resume;
-      return nextProfile;
-    });
+    const nextProfile = { ...profile, updatedAt: data.updated_at || profile.updatedAt };
+    delete nextProfile.resume;
+    setProfile(nextProfile);
+    await storeSessionProfile(nextProfile);
   };
 
   const persistProfile = async (nextProfile) => {
     const updatedAt = new Date().toISOString();
     const profileToSave = { ...nextProfile };
     delete profileToSave.updatedAt;
-    setProfile({ ...nextProfile, updatedAt });
+    const nextProfileWithTimestamp = { ...nextProfile, updatedAt };
+    setProfile(nextProfileWithTimestamp);
+    await storeSessionProfile(nextProfileWithTimestamp);
     if (!userEmail) return;
 
     try {
@@ -1088,7 +1368,9 @@ export default function App() {
       });
       if (!response.ok) throw new Error('Unable to save profile');
       const data = await response.json();
-      setProfile({ ...nextProfile, updatedAt: data.user?.updated_at || updatedAt });
+      const savedProfile = { ...nextProfile, updatedAt: data.user?.updated_at || updatedAt };
+      setProfile(savedProfile);
+      await storeSessionProfile(savedProfile);
     } catch (error) {
       console.warn('Unable to persist profile', error);
     }
@@ -1109,10 +1391,12 @@ export default function App() {
           const accountEmail = user?.email || '';
           setUserEmail(accountEmail);
           if (accountEmail) await AsyncStorage.setItem(ACCOUNT_EMAIL_KEY, accountEmail);
+          const nextProfile = { ...defaultProfile, ...(savedProfile || {}), email: accountEmail, updatedAt: user?.updated_at || savedProfile?.updatedAt || null };
+          await storeSessionProfile(nextProfile);
           if (savedProfile && Object.keys(savedProfile).length > 0) {
-            setProfile((currentProfile) => ({ ...currentProfile, ...savedProfile, email: user?.email || savedProfile.email || '', updatedAt: user?.updated_at || savedProfile.updatedAt || null }));
+            setProfile(nextProfile);
           } else {
-            setProfile((currentProfile) => ({ ...currentProfile, email: user?.email || '', updatedAt: user?.updated_at || null }));
+            setProfile(nextProfile);
           }
           if (isFirstTime) {
             await markUserAsNew();
@@ -1457,9 +1741,32 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileHeaderButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#cbd6dd',
+    borderRadius: 8,
+  },
+  profileHeaderButtonActive: {
+    backgroundColor: '#eaf2ff',
+    borderColor: '#2563eb',
+  },
+  dashboardLogo: {
+    width: 92,
+    height: 52,
   },
   brand: {
     backgroundColor: '#ef4444',
@@ -1581,18 +1888,15 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
   },
-  logoutButton: {
+  logoutIconButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
     borderColor: '#ef4444',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-  },
-  logoutButtonText: {
-    color: '#b91c1c',
-    fontSize: 17,
-    fontWeight: '700',
+    borderRadius: 8,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1734,13 +2038,21 @@ const styles = StyleSheet.create({
   },
   jobMetaRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 10,
   },
   jobMeta: {
     color: '#334155',
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
+  },
+  jobLocation: {
+    flex: 1,
+    minWidth: 0,
+  },
+  jobType: {
+    flexShrink: 0,
+    maxWidth: '38%',
   },
   librarySection: {
     backgroundColor: '#fff',
@@ -1924,6 +2236,42 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 18,
   },
+  connectView: {
+    backgroundColor: '#fff',
+    borderColor: '#d7e0e6',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 18,
+  },
+  connectEyebrow: { color: '#2563eb', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 4 },
+  connectTitle: { color: '#172b3a', fontSize: 21, fontWeight: '700', marginBottom: 5 },
+  connectIntro: { color: '#5b6d7b', fontSize: 12, lineHeight: 17, marginBottom: 16 },
+  connectRoleSwitch: { flexDirection: 'row', alignSelf: 'flex-start', gap: 4, padding: 4, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 8, backgroundColor: '#f3f6f8', marginBottom: 16 },
+  connectRoleButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6 },
+  connectRoleButtonActive: { backgroundColor: '#2563eb' },
+  connectRoleText: { color: '#526779', fontSize: 13, fontWeight: '700' },
+  connectRoleTextActive: { color: '#fff' },
+  connectSearchLabel: { color: '#334155', fontSize: 12, fontWeight: '800', marginBottom: 7 },
+  connectSearchInput: { minHeight: 44, color: '#172b3a', backgroundColor: '#fff', borderColor: '#cbd6dd', borderWidth: 1, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 9 },
+  connectSuggestions: { marginTop: 5, borderColor: '#d7e0e6', borderWidth: 1, borderRadius: 8, overflow: 'hidden', backgroundColor: '#fff' },
+  connectPerson: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#e4eaee' },
+  connectPersonDetails: { flex: 1, minWidth: 0, gap: 3 },
+  connectPersonName: { color: '#172b3a', fontSize: 14, fontWeight: '700' },
+  connectPersonMeta: { color: '#5b6d7b', fontSize: 12 },
+  connectAction: { minHeight: 34, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 11, borderRadius: 6, backgroundColor: '#2563eb' },
+  connectActionText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  connectActionDisabled: { backgroundColor: '#edf2f5' },
+  connectActionTextDisabled: { color: '#526779' },
+  connectSecondaryAction: { minHeight: 34, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 6 },
+  connectSecondaryActionText: { color: '#526779', fontSize: 12, fontWeight: '700' },
+  connectActionGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  connectLists: { gap: 20, marginTop: 24 },
+  connectListSection: { gap: 7 },
+  connectSectionTitle: { color: '#172b3a', fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  connectStatus: { color: '#526779', fontSize: 12, fontWeight: '700' },
+  connectEmpty: { color: '#64748b', fontSize: 12, paddingVertical: 8 },
+  connectError: { color: '#b91c1c', fontSize: 12, marginTop: 8 },
   coursesEyebrow: {
     color: '#2563eb',
     fontSize: 12,

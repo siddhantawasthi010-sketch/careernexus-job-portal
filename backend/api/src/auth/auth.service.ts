@@ -109,6 +109,14 @@ export class AuthService {
     return { user };
   }
 
+  async getProfile(email: string) {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) throw new UnauthorizedException('A valid email is required to load this profile.');
+    const user = await this.databaseService.getUserByEmail(normalizedEmail);
+    if (!user) throw new UnauthorizedException('This account could not be found. Please sign in again.');
+    return { user };
+  }
+
   async updateProfilePhoto(email: string, photo: string) {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || typeof photo !== 'string' || !photo) {

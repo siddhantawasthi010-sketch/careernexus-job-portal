@@ -23,6 +23,9 @@ export declare class AuthService {
     updateProfile(email: string, profile: Record<string, unknown>): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;
+    getProfile(email: string): Promise<{
+        user: import("../database/database.service").StoredUser;
+    }>;
     updateProfilePhoto(email: string, photo: string): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;

@@ -99,6 +99,15 @@ let AuthService = class AuthService {
         const user = await this.databaseService.updateUserProfile(normalizedEmail, profile);
         return { user };
     }
+    async getProfile(email) {
+        const normalizedEmail = email?.trim().toLowerCase();
+        if (!normalizedEmail)
+            throw new common_1.UnauthorizedException('A valid email is required to load this profile.');
+        const user = await this.databaseService.getUserByEmail(normalizedEmail);
+        if (!user)
+            throw new common_1.UnauthorizedException('This account could not be found. Please sign in again.');
+        return { user };
+    }
     async updateProfilePhoto(email, photo) {
         const normalizedEmail = email.trim().toLowerCase();
         if (!normalizedEmail || typeof photo !== 'string' || !photo) {
