@@ -16,4 +16,49 @@ export declare class ConnectService {
         state: "sent" | "received";
     }>;
     respond(email: string, requestId: string, status: string): Promise<import("../database/database.service").ConnectionRequestRecord>;
+    cancelRequest(email: string, requestId: string): Promise<{
+        id: any;
+        state: "cancelled";
+    }>;
+    getReferrals(email: string): Promise<{
+        id: any;
+        job: any;
+        referrer: import("../database/database.service").ConnectPersonRecord;
+        createdAt: any;
+    }[]>;
+    sendReferral(email: string, targetEmail: string, job: Record<string, unknown>): Promise<{
+        id: any;
+        createdAt: any;
+    }>;
+    removeConnection(email: string, targetEmail: string): Promise<{
+        id: any;
+        status: "removed";
+    }>;
+    sendMessage(email: string, targetEmail: string, body: string, job?: Record<string, unknown>): Promise<{
+        id: any;
+        createdAt: any;
+    }>;
+    getMessages(email: string): Promise<{
+        id: any;
+        sender: import("../database/database.service").ConnectPersonRecord;
+        recipient: import("../database/database.service").ConnectPersonRecord;
+        body: any;
+        job: any;
+        createdAt: any;
+        readAt: any;
+        isReceived: boolean;
+        permissionStatus: any;
+    }[]>;
+    approveMessages(email: string, candidateEmail: string): Promise<{
+        candidateEmail: any;
+        status: any;
+    }>;
+    getNotifications(email: string): Promise<{
+        [key: string]: unknown;
+        id: string;
+        type: string;
+        title: string;
+        description: string;
+        createdAt: string;
+    }[]>;
 }

@@ -86,10 +86,46 @@ let AuthService = class AuthService {
         const existingUser = await this.databaseService.getUserByEmail(normalizedEmail);
         const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
         return {
-            accessToken: 'demo-jwt-token-for-careernexus-job-portal',
+            accessToken: this.createAccessToken(normalizedEmail),
             isNewUser: !existingUser,
             user,
         };
+    }
+    createAccessToken(email) {
+        const payload = Buffer.from(JSON.stringify({ email, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 })).toString('base64url');
+        const signature = (0, crypto_1.createHmac)('sha256', this.getAccessTokenSecret()).update(payload).digest('base64url');
+        return `${payload}.${signature}`;
+    }
+    getEmailFromAccessToken(token) {
+        const [payload, signature, extra] = token.split('.');
+        if (!payload || !signature || extra)
+            return null;
+        const expectedSignature = (0, crypto_1.createHmac)('sha256', this.getAccessTokenSecret()).update(payload).digest();
+        let receivedSignature;
+        try {
+            receivedSignature = Buffer.from(signature, 'base64url');
+        }
+        catch {
+            return null;
+        }
+        if (receivedSignature.length !== expectedSignature.length || !(0, crypto_1.timingSafeEqual)(receivedSignature, expectedSignature))
+            return null;
+        try {
+            const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+            if (typeof claims.email !== 'string' || typeof claims.expiresAt !== 'number' || claims.expiresAt <= Date.now())
+                return null;
+            return claims.email;
+        }
+        catch {
+            return null;
+        }
+    }
+    getAccessTokenSecret() {
+        const secret = process.env.AUTH_TOKEN_SECRET;
+        if (!secret || secret.length < 32) {
+            throw new common_1.InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
+        }
+        return secret;
     }
     async updateProfile(email, profile) {
         const normalizedEmail = email.trim().toLowerCase();

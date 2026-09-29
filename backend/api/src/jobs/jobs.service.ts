@@ -222,7 +222,11 @@ export class JobsService implements OnModuleInit {
     }
 
     const providers = this.getProviders(search.keywords, search.locations);
-    const allMatches = (await this.databaseService.getRecentFeedJobs())
+    const availableJobs = [
+      ...await this.databaseService.getRecentFeedJobs(),
+      ...await this.databaseService.getRecruiterJobListings() as PortalJob[],
+    ];
+    const allMatches = availableJobs
       .map((job) => ({ ...job, matchScore: this.scoreJob(job, user.profile) }))
       .filter((job) => job.matchScore > 0)
       .sort((left, right) => right.matchScore - left.matchScore);
@@ -378,7 +382,9 @@ export class JobsService implements OnModuleInit {
     if (process.env.RAPIDAPI_KEY) providers.push({ name: 'JSearch', cacheKey: `jsearch:${searchKey}`, fetchJobs: () => this.fetchJSearch(process.env.RAPIDAPI_KEY as string, keywords, locations) });
 
     const greenhouseBoards = asStrings(process.env.GREENHOUSE_BOARD_SLUGS);
-    if (greenhouseBoards.length) providers.push({ name: 'Greenhouse', cacheKey: `greenhouse:${greenhouseBoards.slice().sort().join(',')}`, fetchJobs: () => this.fetchGreenhouse(greenhouseBoards) });
+    for (const board of greenhouseBoards) {
+      providers.push({ name: 'Greenhouse', cacheKey: `greenhouse:${board}`, fetchJobs: () => this.fetchGreenhouse(board) });
+    }
     const leverSites = asStrings(process.env.LEVER_COMPANY_SITES);
     if (leverSites.length) providers.push({ name: 'Lever', cacheKey: `lever:${leverSites.slice().sort().join(',')}:${locations.map(normalize).join(',')}`, fetchJobs: () => this.fetchLever(leverSites, locations) });
     const ashbyBoards = asStrings(process.env.ASHBY_JOB_BOARDS);
@@ -397,7 +403,7 @@ export class JobsService implements OnModuleInit {
     if (cached?.pending) return cached.pending;
     if (cached && cached.expiresAt > now) return cached.jobs;
 
-    const retryAfter = this.providerRetryAfter.get(provider.name) || 0;
+    const retryAfter = Math.max(this.providerRetryAfter.get(provider.name) || 0, this.providerRetryAfter.get(provider.cacheKey) || 0);
     if (retryAfter > now) return staleJobs;
 
     const pending = provider.fetchJobs();
@@ -411,7 +417,7 @@ export class JobsService implements OnModuleInit {
       if (provider.name === 'JSearch' && /HTTP (403|429)/.test(message)) {
         this.providerRetryAfter.set(provider.name, Date.now() + 60 * 60 * 1000);
       } else if (/timed out|timeout|aborted/i.test(message)) {
-        this.providerRetryAfter.set(provider.name, Date.now() + 5 * 60 * 1000);
+        this.providerRetryAfter.set(provider.cacheKey, Date.now() + 5 * 60 * 1000);
       }
       this.providerJobCache.set(provider.cacheKey, { expiresAt: 0, jobs: staleJobs });
       throw error;
@@ -424,7 +430,9 @@ export class JobsService implements OnModuleInit {
       return 'RapidAPI rate limit or plan quota reached (HTTP 429). JSearch will pause for one hour; check your RapidAPI usage/plan.';
     }
     if (/timed out|timeout|aborted/i.test(message)) {
-      return 'The provider request timed out. Other sources remain available; cached results will be used when possible.';
+      const greenhouseBoard = message.match(/Greenhouse board ([^:]+):/);
+      const providerLabel = greenhouseBoard ? `Greenhouse board ${greenhouseBoard[1]}` : provider;
+      return `${providerLabel} request timed out. Other sources remain available; cached results will be used when possible.`;
     }
     return message;
   }
@@ -608,17 +616,20 @@ export class JobsService implements OnModuleInit {
     return batches.flat();
   }
 
-  private async fetchGreenhouse(boards: string[]): Promise<PortalJob[]> {
-    const batches = await Promise.all(boards.map(async (board) => {
-      const data = asRecord(await this.requestJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`));
-      return asArray(data.jobs).map((job) => {
-        const place = asRecord(job.location);
-        const title = asString(job.title);
-        const description = stripMarkup(asString(job.content));
-        return this.createJob('Greenhouse', String(job.id || ''), title, board.replace(/[-_]/g, ' '), asString(place.name), description, asString(job.absolute_url), { postedAt: asString(job.updated_at) || null });
-      }).filter((job): job is PortalJob => job !== null);
-    }));
-    return batches.flat();
+  private async fetchGreenhouse(board: string): Promise<PortalJob[]> {
+    let data: UnknownRecord;
+    try {
+      data = asRecord(await this.requestJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`, undefined, 25000));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Provider request failed.';
+      throw new Error(`Greenhouse board ${board}: ${message}`);
+    }
+    return asArray(data.jobs).map((job) => {
+      const place = asRecord(job.location);
+      const title = asString(job.title);
+      const description = stripMarkup(asString(job.content));
+      return this.createJob('Greenhouse', String(job.id || ''), title, board.replace(/[-_]/g, ' '), asString(place.name), description, asString(job.absolute_url), { postedAt: asString(job.updated_at) || null });
+    }).filter((job): job is PortalJob => job !== null);
   }
 
   private async fetchLever(sites: string[], locations: string[]): Promise<PortalJob[]> {
@@ -690,6 +701,72 @@ export class JobsService implements OnModuleInit {
   apply(email: string, job: Record<string, unknown>) {
     if (!email?.trim()) throw new UnauthorizedException('A valid email is required to apply.');
     return this.databaseService.applyUserToJob(email, job);
+  }
+
+  getRecruiterOpenings(email: string) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid recruiter email is required.');
+    return this.databaseService.getRecruiterJobOpenings(email);
+  }
+
+  createRecruiterOpening(email: string, input: Record<string, unknown>) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid recruiter email is required.');
+    if (typeof input.position !== 'string' || !input.position.trim()
+      || typeof input.location !== 'string' || !input.location.trim()
+      || !['Hybrid', 'Full-time'].includes(String(input.workMode))
+      || typeof input.description !== 'string' || !input.description.trim()
+      || typeof input.companyAbout !== 'string' || !input.companyAbout.trim()) {
+      throw new NotFoundException('Complete all required job opening details.');
+    }
+    return this.databaseService.createRecruiterJobOpening(email, input);
+  }
+
+  closeRecruiterOpening(email: string, openingId: string) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid recruiter email is required.');
+    return this.databaseService.closeRecruiterJobOpening(email, openingId);
+  }
+
+  applyToRecruiterOpening(email: string, openingId: string, details: Record<string, unknown>) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid candidate email is required.');
+    return this.databaseService.applyToRecruiterJob(email, openingId, details || {});
+  }
+
+  async getReceivedApplications(email: string) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid recruiter email is required.');
+    const openings = await this.databaseService.getRecruiterApplications(email);
+    return openings.map((opening) => ({
+      ...opening,
+      applicants: (opening.applicants as Record<string, unknown>[]).map((application) => {
+        const candidate = application.candidate as Record<string, unknown>;
+        const profile = candidate.profile as Record<string, unknown> || {};
+        const score = this.scoreJob(opening as PortalJob, profile);
+        const employment = Array.isArray(profile.employmentDetails) ? profile.employmentDetails.map(asRecord) : [];
+        const current = employment.find((entry) => entry.isCurrent) || employment[0] || {};
+        return {
+          ...application,
+          matchScore: score,
+          candidate: {
+            id: candidate.id,
+            name: candidate.name,
+            email: candidate.email,
+            headline: asString(profile.headline || profile.currentlyWorkingAs || profile.currentRole),
+            company: asString(profile.companyName || profile.currentCompany || current.companyName),
+          },
+        };
+      }).sort((left, right) => Number(right.matchScore) - Number(left.matchScore)),
+    }));
+  }
+
+  getReceivedApplication(email: string, applicationId: string) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid recruiter email is required.');
+    return this.databaseService.getRecruiterApplicationDetails(email, applicationId);
+  }
+
+  setApplicationStatus(email: string, applicationId: string, status: string) {
+    if (!email?.trim()) throw new UnauthorizedException('A valid recruiter email is required.');
+    if (!['viewed', 'resume_downloaded', 'shortlisted', 'not_shortlisted'].includes(status)) {
+      throw new NotFoundException('Choose a valid application status.');
+    }
+    return this.databaseService.updateRecruiterApplicationStatus(email, applicationId, status);
   }
 
   private scoreJob(job: PortalJob, profile: Record<string, unknown>) {

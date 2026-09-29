@@ -82,6 +82,123 @@ export declare class DatabaseService {
     constructor();
     getUserByEmail(email: string): Promise<StoredUser | null>;
     private getConnectIdentity;
+    private toRecruiterJob;
+    getRecruiterJobListings(): Promise<{
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }[]>;
+    getRecruiterJobOpenings(email: string): Promise<{
+        applicantsCount: number;
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }[]>;
+    createRecruiterJobOpening(email: string, input: Record<string, unknown>): Promise<{
+        applicantsCount: number;
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }>;
+    closeRecruiterJobOpening(email: string, openingId: string): Promise<{
+        id: string;
+        status: string;
+    }>;
+    applyToRecruiterJob(email: string, openingId: string, details: Record<string, unknown>): Promise<{
+        appliedAt: any;
+        applicationDetails: any;
+        reviewStatus: any;
+    }>;
+    getRecruiterApplications(email: string): Promise<{
+        applicants: Record<string, unknown>[];
+        applicantsCount: number;
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }[]>;
+    getRecruiterApplicationDetails(email: string, applicationId: string): Promise<{
+        id: any;
+        job: any;
+        appliedAt: any;
+        applicationDetails: any;
+        reviewStatus: any;
+        candidate: {
+            id: any;
+            name: any;
+            email: any;
+            profile: Record<string, unknown>;
+        };
+        resume: {
+            resume: {
+                storagePath?: string;
+            };
+            downloadUrl: string;
+        };
+    }>;
+    updateRecruiterApplicationStatus(email: string, applicationId: string, status: string): Promise<{
+        id: any;
+        reviewStatus: any;
+    }>;
     private toConnectPerson;
     private getConnectionRequestsForUser;
     searchConnectPeople(email: string, role: UserRole, query: string): Promise<{
@@ -107,6 +224,51 @@ export declare class DatabaseService {
         state: "sent" | "received";
     }>;
     respondToConnectionRequest(email: string, requestId: string, status: 'accepted' | 'declined'): Promise<ConnectionRequestRecord>;
+    removeConnection(email: string, targetEmail: string): Promise<{
+        id: any;
+        status: "removed";
+    }>;
+    sendUserMessage(email: string, targetEmail: string, body: string, job?: Record<string, unknown>): Promise<{
+        id: any;
+        createdAt: any;
+    }>;
+    getUserMessages(email: string): Promise<{
+        id: any;
+        sender: ConnectPersonRecord;
+        recipient: ConnectPersonRecord;
+        body: any;
+        job: any;
+        createdAt: any;
+        readAt: any;
+        isReceived: boolean;
+        permissionStatus: any;
+    }[]>;
+    approveCandidateMessages(recruiterEmail: string, candidateEmail: string): Promise<{
+        candidateEmail: any;
+        status: any;
+    }>;
+    getUserNotifications(email: string): Promise<{
+        [key: string]: unknown;
+        id: string;
+        type: string;
+        title: string;
+        description: string;
+        createdAt: string;
+    }[]>;
+    cancelConnectionRequest(email: string, requestId: string): Promise<{
+        id: any;
+        state: "cancelled";
+    }>;
+    getReferralsForUser(email: string): Promise<{
+        id: any;
+        job: any;
+        referrer: ConnectPersonRecord;
+        createdAt: any;
+    }[]>;
+    createJobReferral(email: string, targetEmail: string, job: Record<string, unknown>): Promise<{
+        id: any;
+        createdAt: any;
+    }>;
     getCandidateJobSearchProfiles(): Promise<Record<string, unknown>[]>;
     upsertUser(user: {
         email: string;

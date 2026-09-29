@@ -20,6 +20,9 @@ export declare class AuthService {
         isNewUser: boolean;
         user: import("../database/database.service").StoredUser;
     }>;
+    createAccessToken(email: string): string;
+    getEmailFromAccessToken(token: string): string | null;
+    private getAccessTokenSecret;
     updateProfile(email: string, profile: Record<string, unknown>): Promise<{
         user: import("../database/database.service").StoredUser;
     }>;

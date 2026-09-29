@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { EmailService } from '../email/email.service';
 import { DatabaseService, UserRole } from '../database/database.service';
 
@@ -93,10 +93,44 @@ export class AuthService {
     const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
 
     return {
-      accessToken: 'demo-jwt-token-for-careernexus-job-portal',
+      accessToken: this.createAccessToken(normalizedEmail),
       isNewUser: !existingUser,
       user,
     };
+  }
+
+  createAccessToken(email: string) {
+    const payload = Buffer.from(JSON.stringify({ email, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 })).toString('base64url');
+    const signature = createHmac('sha256', this.getAccessTokenSecret()).update(payload).digest('base64url');
+    return `${payload}.${signature}`;
+  }
+
+  getEmailFromAccessToken(token: string): string | null {
+    const [payload, signature, extra] = token.split('.');
+    if (!payload || !signature || extra) return null;
+    const expectedSignature = createHmac('sha256', this.getAccessTokenSecret()).update(payload).digest();
+    let receivedSignature: Buffer;
+    try {
+      receivedSignature = Buffer.from(signature, 'base64url');
+    } catch {
+      return null;
+    }
+    if (receivedSignature.length !== expectedSignature.length || !timingSafeEqual(receivedSignature, expectedSignature)) return null;
+    try {
+      const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { email?: unknown; expiresAt?: unknown };
+      if (typeof claims.email !== 'string' || typeof claims.expiresAt !== 'number' || claims.expiresAt <= Date.now()) return null;
+      return claims.email;
+    } catch {
+      return null;
+    }
+  }
+
+  private getAccessTokenSecret() {
+    const secret = process.env.AUTH_TOKEN_SECRET;
+    if (!secret || secret.length < 32) {
+      throw new InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
+    }
+    return secret;
   }
 
   async updateProfile(email: string, profile: Record<string, unknown>) {

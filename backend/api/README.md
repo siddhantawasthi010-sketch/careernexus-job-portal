@@ -13,7 +13,7 @@ npm run start:dev
 
 1. Create a Supabase project and open its SQL Editor.
 2. Run [`supabase.sql`](supabase.sql) to create and seed the application tables, including user employment and major project records.
-3. Copy `.env.example` to `.env` and set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+3. Copy `.env.example` to `.env` and set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and a private `AUTH_TOKEN_SECRET` with at least 32 characters.
 
 If OTP requests fail with `column users.profile does not exist`, the database was created from an older schema. Run the following in the same Supabase project's SQL Editor, then restart the API:
 
@@ -22,9 +22,11 @@ alter table public.users
 add column if not exists profile jsonb not null default '{}'::jsonb;
 ```
 
-For an existing database, rerun the current [`supabase.sql`](supabase.sql) in the SQL Editor to create the employment/project tables, `user_job_applications`, `career_portals`, `job_feed_items`, and private `user-resumes` storage bucket. Profile fields, skills, and resume metadata are stored in `users.profile`; resume file contents are stored in the private bucket.
+For an existing database, rerun the current [`supabase.sql`](supabase.sql) in the SQL Editor to create the employment/project tables, `recruiter_job_openings`, application review fields, `user_connection_requests`, `user_job_referrals`, message permissions/messages, `career_portals`, `job_feed_items`, and private `user-resumes` storage bucket. Profile fields, skills, and resume metadata are stored in `users.profile`; resume file contents are stored in the private bucket.
 
 The service-role key is backend-only. Do not put it in either frontend application or commit it to source control.
+
+Successful OTP verification returns a seven-day signed bearer token. All `/connect` routes require it, and the token email must match the email parameter or body field. Configure a unique, random `AUTH_TOKEN_SECRET` in every API environment; never expose it to either frontend.
 
 ## Endpoints
 
@@ -35,10 +37,25 @@ The service-role key is backend-only. Do not put it in either frontend applicati
 - `GET /jobs/recommendations?email=...` → return profile-matched job listings
 - `GET /jobs/applications?email=...` → list jobs the candidate has applied to
 - `POST /jobs/applications` → save a candidate's Apply action and job snapshot
+- `GET /jobs/recruiter?email=...` → list the recruiter's openings and applicant counts
+- `POST /jobs/recruiter` → create an opening using the recruiter's current organization
+- `PATCH /jobs/recruiter/:openingId/close` → close an opening so candidates cannot apply
+- `GET /jobs/recruiter/applications?email=...` → list openings and score-ranked applicants
+- `GET /jobs/recruiter/applications/:applicationId?email=...` → load applicant profile and a signed resume link
+- `PATCH /jobs/recruiter/applications/:applicationId/status` → set viewed, resume_downloaded, shortlisted, or not_shortlisted
+- `POST /jobs/recruiter/:openingId/applications` → submit a candidate's CN Apply details
 - `GET /connect?email=...` → list incoming/outgoing requests and approved connections
 - `GET /connect/search?email=...&role=candidate|recruiter&q=...` → search members by name, email, or company
 - `POST /connect/requests` → send a connection request with `{ "email": "...", "targetEmail": "..." }`
 - `PATCH /connect/requests/:requestId` → accept or decline a pending request with `{ "email": "...", "status": "accepted|declined" }`
+- `DELETE /connect/requests/:requestId?email=...` → cancel the caller's pending outgoing request
+- `GET /connect/referrals?email=...` → list job referrals received by the candidate
+- `POST /connect/referrals` → refer a connected candidate to a job with `{ "email": "...", "targetEmail": "...", "job": { "id": "...", "title": "...", "url": "..." } }`
+- `DELETE /connect/connections/:targetEmail?email=...` → remove an accepted connection
+- `GET /connect/messages?email=...` → list sent and received messages
+- `POST /connect/messages` → send a message with `{ "email": "...", "targetEmail": "...", "body": "...", "job": {} }`
+- `PATCH /connect/messages/permissions/:candidateEmail` → approve a candidate's message request
+- `GET /connect/notifications?email=...` → list received messages and recruiter application notifications
 - `GET /library/topics` → list active Library topics ordered alphabetically
 - `GET /courses` → list active online courses ordered by topic and title
 - `POST /auth/send-otp` → create and email an OTP

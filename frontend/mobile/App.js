@@ -10,6 +10,7 @@ import {
   Image,
   Alert,
   Linking,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -23,7 +24,9 @@ import {
 
 const STORAGE_KEY = 'jobportal_user_profile_status';
 const ACCOUNT_EMAIL_KEY = 'jobportal_account_email';
+const USER_ROLE_KEY = 'jobportal_user_role';
 const SESSION_PROFILE_KEY = 'jobportal_session_profile';
+const ACCESS_TOKEN_KEY = 'jobportal_access_token';
 
 const getSalaryInputValue = (value = '') => value.replace(/^(INR|₹)\s*/i, '');
 
@@ -43,8 +46,11 @@ const getApiBaseUrl = () => {
   return `http://${host}:5000`;
 };
 
+const getConnectAuthHeaders = async () => ({ Authorization: `Bearer ${await AsyncStorage.getItem(ACCESS_TOKEN_KEY) || ''}` });
+
 const defaultProfile = {
   name: '',
+  professionalSummary: '',
   headline: '',
   currentlyWorkingAs: '',
   email: '',
@@ -95,6 +101,7 @@ function LoginScreen({ onLogin }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [knownIsNewUser, setKnownIsNewUser] = useState(null);
 
   const handleSendOtp = async () => {
     if (loadingOtp || resendCooldown > 0) return;
@@ -119,6 +126,7 @@ function LoginScreen({ onLogin }) {
         throw new Error(data.message || 'Unable to send OTP');
       }
 
+      setKnownIsNewUser(Boolean(data.isNewUser));
       setMessage(data.message || 'OTP sent successfully.');
       setOtpSent(true);
       setResendCooldown(30);
@@ -132,8 +140,7 @@ function LoginScreen({ onLogin }) {
         setError(error.message || 'OTP verification failed. Please try again.');
         return;
       }
-      const fallbackStatus = await AsyncStorage.getItem(STORAGE_KEY);
-      const shouldUseFallback = fallbackStatus === 'new-user' || !fallbackStatus;
+      const shouldUseFallback = knownIsNewUser === true;
       setMessage('Backend unavailable. Falling back to local onboarding flow.');
       setOtpSent(true);
       if (shouldUseFallback) {
@@ -177,12 +184,11 @@ function LoginScreen({ onLogin }) {
 
       const isFirstTimeUser = Boolean(data.isNewUser);
       await AsyncStorage.setItem(STORAGE_KEY, isFirstTimeUser ? 'new-user' : 'existing-user');
-      onLogin({ user: data.user, profile: data.user.profile, isFirstTime: isFirstTimeUser });
+      onLogin({ user: data.user, profile: data.user.profile, isFirstTime: isFirstTimeUser, accessToken: data.accessToken });
     } catch (error) {
-      const storedStatus = await AsyncStorage.getItem(STORAGE_KEY);
-      const fallbackIsFirstTime = storedStatus === 'new-user' || !storedStatus;
+      const fallbackIsFirstTime = knownIsNewUser === true;
       await AsyncStorage.setItem(STORAGE_KEY, fallbackIsFirstTime ? 'new-user' : 'existing-user');
-      onLogin({ user: { email, role }, isFirstTime: fallbackIsFirstTime });
+      onLogin({ user: { email, role }, isFirstTime: fallbackIsFirstTime, accessToken: null });
     } finally {
       setLoadingVerify(false);
     }
@@ -203,6 +209,7 @@ function LoginScreen({ onLogin }) {
             onPress={() => {
               setRole('recruiter');
               setEmail('recruiter@jobportal.com');
+              setKnownIsNewUser(null);
               setOtp('');
               setOtpSent(false);
               setError('');
@@ -216,6 +223,7 @@ function LoginScreen({ onLogin }) {
             onPress={() => {
               setRole('candidate');
               setEmail('candidate@jobportal.com');
+              setKnownIsNewUser(null);
               setOtp('');
               setOtpSent(false);
               setError('');
@@ -228,7 +236,7 @@ function LoginScreen({ onLogin }) {
         <TextInput
           style={styles.input}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(value) => { setEmail(value); setKnownIsNewUser(null); }}
           placeholder={role === 'recruiter' ? 'recruiter@jobportal.com' : 'candidate@jobportal.com'}
           placeholderTextColor="#94a3b8"
           autoCapitalize="none"
@@ -366,12 +374,14 @@ function PreferredCitiesField({ value, onChange, error }) {
   );
 }
 
-function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit }) {
+function ProfileForm({ profile, email, role, onSave, onSkip, isEditing, sectionToEdit }) {
   const [form, setForm] = useState(() => ({ ...defaultProfile, ...profile, email: email || profile.email || '' }));
   const [skillDraft, setSkillDraft] = useState(profile.skills || []);
   const [skillInput, setSkillInput] = useState('');
   const [expandedDropdown, setExpandedDropdown] = useState('');
   const [preferredCityError, setPreferredCityError] = useState('');
+  const [profileFormError, setProfileFormError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
   const updateEntry = (collection, index, field, value) => setForm((prev) => ({
@@ -390,13 +400,29 @@ function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit 
     </TouchableOpacity>
     {expandedDropdown === dropdownKey && <View style={styles.dropdownOptions}>{choices.map((choice) => <TouchableOpacity key={choice} style={styles.dropdownOption} onPress={() => { onChange(key, choice); setExpandedDropdown(''); }}><Text style={styles.dropdownOptionText}>{choice}</Text></TouchableOpacity>)}</View>}
   </View>;
-  const saveForm = () => {
+  const saveForm = async () => {
+    setProfileFormError('');
     const cityCount = Array.isArray(form.preferredCity) ? form.preferredCity.length : form.preferredCity ? 1 : 0;
-    if ((!sectionToEdit || sectionToEdit === 'careerPreferences') && cityCount < 1) {
+    if (role === 'candidate' && (!sectionToEdit || sectionToEdit === 'careerPreferences') && cityCount < 1) {
       setPreferredCityError('Select at least 1 preferred city.');
       return;
     }
-    onSave({ ...form, skills: skillDraft });
+    if (role === 'recruiter' && (!sectionToEdit || sectionToEdit === 'professionalSummary') && !form.professionalSummary.trim()) {
+      setProfileFormError('Add a professional summary.');
+      return;
+    }
+    if (role === 'recruiter' && (!sectionToEdit || sectionToEdit === 'employmentDetails') && !form.employmentDetails?.some((entry) => entry.isCurrent && entry.companyName?.trim())) {
+      setProfileFormError('Add your current organization under Employment Details.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSave({ ...form, skills: skillDraft });
+    } catch (saveError) {
+      setProfileFormError(saveError.message || 'Unable to save profile. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
   const section = (title, children, action, sectionKey) => (!sectionToEdit || sectionToEdit === sectionKey) ? <View style={styles.formSection} key={title}><View style={styles.formSectionHeading}><Text style={styles.formSectionTitle}>{title}</Text>{action}</View>{children}</View> : null;
   const addSkill = () => {
@@ -411,6 +437,7 @@ function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit 
       <ScrollView style={styles.formScroll} contentContainerStyle={styles.formScrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.formCard}>
           <Text style={styles.sectionHeading}>{sectionToEdit ? 'Edit profile section' : 'Complete your professional profile'}</Text>
+          {role === 'recruiter' ? section('Professional Summary', <>{field('Professional summary', 'professionalSummary', form, updateField, { multiline: true })}</>, null, 'professionalSummary') : null}
           {section('Professional Profile', <>
             {field('Profile headline', 'headline', form, updateField)}{field('Name', 'name', form, updateField)}{field('Contact', 'contact', form, updateField, { keyboardType: 'phone-pad' })}{field('Currently working as', 'currentlyWorkingAs', form, updateField)}{field('Email ID', 'email', form, updateField, { keyboardType: 'email-address', autoCapitalize: 'none' })}{field('Education', 'education', form, updateField)}
             <LocationField label="Current location" value={form.location} onChange={(value) => updateField('location', value)} />
@@ -453,9 +480,10 @@ function ProfileForm({ profile, email, onSave, onSkip, isEditing, sectionToEdit 
           </>, null, 'majorProjects')}
 
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.secondaryButton} onPress={onSkip}><Text style={styles.secondaryButtonText}>{sectionToEdit ? 'Cancel' : 'Later'}</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.primaryButton} onPress={saveForm}><Text style={styles.primaryButtonText}>{sectionToEdit === 'keySkillsSet' ? 'Save skills' : sectionToEdit ? 'Save changes' : isEditing ? 'Update profile' : 'Create profile'}</Text></TouchableOpacity>
+            {(sectionToEdit || role !== 'recruiter') ? <TouchableOpacity style={styles.secondaryButton} onPress={onSkip}><Text style={styles.secondaryButtonText}>{sectionToEdit ? 'Cancel' : 'Later'}</Text></TouchableOpacity> : null}
+            <TouchableOpacity style={styles.primaryButton} onPress={saveForm} disabled={isSaving}><Text style={styles.primaryButtonText}>{isSaving ? 'Saving...' : sectionToEdit === 'keySkillsSet' ? 'Save skills' : sectionToEdit ? 'Save changes' : isEditing ? 'Update profile' : 'Create profile'}</Text></TouchableOpacity>
           </View>
+          {profileFormError ? <Text style={styles.connectError}>{profileFormError}</Text> : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -658,18 +686,29 @@ function CoursesView() {
   return <CoursesList courses={courseList} />;
 }
 
-function ConnectView({ email }) {
+function ConnectView({ email, profile, onApplyReferral, onApplyRecruiterJob, appliedJobIds, initialPerson, onMessage }) {
   const [targetRole, setTargetRole] = useState('candidate');
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [selectedReferral, setSelectedReferral] = useState(null);
+  const [activeSection, setActiveSection] = useState('search');
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [overview, setOverview] = useState({ incoming: [], outgoing: [], connections: [] });
+  const [referrals, setReferrals] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
   const [processingId, setProcessingId] = useState('');
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!initialPerson) return;
+    setSelectedPerson(initialPerson);
+    setTargetRole(initialPerson.role);
+    setActiveSection('connections');
+  }, [initialPerson]);
+
   const loadOverview = async () => {
-    const response = await fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`);
+    const response = await fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`, { headers: await getConnectAuthHeaders() });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Unable to load connections.');
     setOverview(data);
@@ -678,7 +717,7 @@ function ConnectView({ email }) {
   useEffect(() => {
     let isActive = true;
     setIsLoadingOverview(true);
-    fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`)
+    getConnectAuthHeaders().then((headers) => fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`, { headers }))
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Unable to load connections.');
@@ -686,6 +725,13 @@ function ConnectView({ email }) {
       })
       .catch((loadError) => { if (isActive) setError(loadError.message || 'Unable to load connections.'); })
       .finally(() => { if (isActive) setIsLoadingOverview(false); });
+    getConnectAuthHeaders().then((headers) => fetch(`${getApiBaseUrl()}/connect/referrals?email=${encodeURIComponent(email)}`, { headers }))
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load referrals.');
+        if (isActive) setReferrals(Array.isArray(data) ? data : []);
+      })
+      .catch((loadError) => { if (isActive) setError(loadError.message || 'Unable to load referrals.'); });
     return () => { isActive = false; };
   }, [email]);
 
@@ -701,7 +747,7 @@ function ConnectView({ email }) {
       setIsSearching(true);
       try {
         const params = new URLSearchParams({ email, role: targetRole, q: searchText });
-        const response = await fetch(`${getApiBaseUrl()}/connect/search?${params}`);
+        const response = await fetch(`${getApiBaseUrl()}/connect/search?${params}`, { headers: await getConnectAuthHeaders() });
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Unable to search members.');
         if (isActive) setSuggestions(Array.isArray(data) ? data : []);
@@ -720,12 +766,12 @@ function ConnectView({ email }) {
     try {
       const response = await fetch(`${getApiBaseUrl()}/connect/requests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() },
         body: JSON.stringify({ email, targetEmail: person.email }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Unable to send the request.');
-      setSuggestions((current) => current.map((item) => item.id === person.id ? { ...item, connectionState: data.state, requestId: data.state === 'received' ? data.request?.id : null } : item));
+      setSuggestions((current) => current.map((item) => item.id === person.id ? { ...item, connectionState: data.state, requestId: data.request?.id || null } : item));
       await loadOverview();
     } catch (requestError) {
       setError(requestError.message || 'Unable to send the request.');
@@ -740,13 +786,13 @@ function ConnectView({ email }) {
     try {
       const response = await fetch(`${getApiBaseUrl()}/connect/requests/${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() },
         body: JSON.stringify({ email, status }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Unable to update this request.');
       await loadOverview();
-      setSuggestions((current) => current.map((person) => person.id === data.requester_user_id ? { ...person, connectionState: status === 'accepted' ? 'connected' : null } : person));
+      setSuggestions((current) => current.map((person) => person.id === data.requester_user_id ? { ...person, connectionState: status === 'accepted' ? 'connected' : null, requestId: null } : person));
     } catch (requestError) {
       setError(requestError.message || 'Unable to update this request.');
     } finally {
@@ -754,9 +800,54 @@ function ConnectView({ email }) {
     }
   };
 
+  const cancelRequest = async (requestId) => {
+    setProcessingId(requestId);
+    setError('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/requests/${encodeURIComponent(requestId)}?email=${encodeURIComponent(email)}`, { method: 'DELETE', headers: await getConnectAuthHeaders() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to cancel this request.');
+      await loadOverview();
+      setSuggestions((current) => current.map((person) => person.requestId === requestId ? { ...person, connectionState: null, requestId: null } : person));
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to cancel this request.');
+    } finally {
+      setProcessingId('');
+    }
+  };
+
+  const removeConnection = async () => {
+    if (!selectedPerson) return;
+    setProcessingId(selectedPerson.id);
+    setError('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/connections/${encodeURIComponent(selectedPerson.email)}?email=${encodeURIComponent(email)}`, { method: 'DELETE', headers: await getConnectAuthHeaders() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to remove this connection.');
+      await loadOverview();
+      setSelectedPerson(null);
+    } catch (removeError) {
+      setError(removeError.message || 'Unable to remove this connection.');
+    } finally {
+      setProcessingId('');
+    }
+  };
+
+  const applyReferral = async (job) => {
+    setProcessingId(String(job.id));
+    setError('');
+    try {
+      await onApplyReferral(job);
+    } catch (applyError) {
+      setError(applyError.message || 'Unable to apply to this referral.');
+    } finally {
+      setProcessingId('');
+    }
+  };
+
   const renderPerson = (person, actions = null, requestId = person.id) => <View style={styles.connectPerson} key={requestId}>
     <View style={styles.connectPersonDetails}>
-      <Text style={styles.connectPersonName}>{person.name}</Text>
+      <TouchableOpacity onPress={() => setSelectedPerson(person)}><Text style={styles.connectPersonName}>{person.name}</Text></TouchableOpacity>
       <Text style={styles.connectPersonMeta}>{person.email}</Text>
       {person.headline ? <Text style={styles.connectPersonMeta}>{person.headline}</Text> : null}
       {person.company ? <Text style={styles.connectPersonMeta}>{person.company}</Text> : null}
@@ -764,44 +855,65 @@ function ConnectView({ email }) {
     {actions}
   </View>;
 
+  const roleTabs = [
+    ['search', `Search ${targetRole === 'candidate' ? 'Candidates' : 'Recruiters'}`],
+    ['incoming', 'Incoming Requests'],
+    ['connections', 'Connections'],
+    ['sent', 'Requests Sent'],
+    ...(targetRole === 'candidate' ? [['referrals', 'Referrals']] : []),
+  ];
+  const roleIncoming = overview.incoming.filter((request) => request.person.role === targetRole);
+  const roleOutgoing = overview.outgoing.filter((request) => request.person.role === targetRole);
+  const roleConnections = overview.connections.filter((connection) => connection.person.role === targetRole);
+
   return <View style={styles.connectView}>
     <Text style={styles.connectEyebrow}>NETWORK</Text>
-    <Text style={styles.connectTitle}>Connect</Text>
-    <Text style={styles.connectIntro}>Find candidates and recruiters, send requests, and manage your connections.</Text>
+    <Text style={styles.connectTitle}>{targetRole === 'candidate' ? 'Candidate Connect' : 'Recruiter Connect'}</Text>
     <View style={styles.connectRoleSwitch}>
-      {['candidate', 'recruiter'].map((role) => <TouchableOpacity key={role} style={[styles.connectRoleButton, targetRole === role && styles.connectRoleButtonActive]} onPress={() => setTargetRole(role)} accessibilityRole="tab" accessibilityState={{ selected: targetRole === role }}><Text style={[styles.connectRoleText, targetRole === role && styles.connectRoleTextActive]}>{role === 'candidate' ? 'Candidates' : 'Recruiters'}</Text></TouchableOpacity>)}
+      {['candidate', 'recruiter'].map((role) => <TouchableOpacity key={role} style={[styles.connectRoleButton, targetRole === role && styles.connectRoleButtonActive]} onPress={() => { setTargetRole(role); setActiveSection('search'); }} accessibilityRole="tab" accessibilityState={{ selected: targetRole === role }}><Text style={[styles.connectRoleText, targetRole === role && styles.connectRoleTextActive]}>{role === 'candidate' ? 'Candidates' : 'Recruiters'}</Text></TouchableOpacity>)}
     </View>
-    <Text style={styles.connectSearchLabel}>Search {targetRole === 'candidate' ? 'candidates' : 'recruiters'}</Text>
-    <TextInput style={styles.connectSearchInput} value={query} onChangeText={setQuery} placeholder="Name, email, or company" placeholderTextColor="#94a3b8" autoCapitalize="none" accessibilityLabel={`Search ${targetRole}s by name, email, or company`} />
-    {query.trim().length >= 2 ? <View style={styles.connectSuggestions}>
-      {isSearching ? <Text style={styles.connectEmpty}>Searching...</Text> : suggestions.length ? suggestions.map((person) => {
-        const isProcessing = processingId === person.id;
-        const label = isProcessing ? 'Sending...' : person.connectionState === 'connected' ? 'Connected' : person.connectionState === 'sent' ? 'Request Sent' : person.connectionState === 'received' ? 'Request Received' : 'Connect';
-        return renderPerson(person, <TouchableOpacity style={[styles.connectAction, person.connectionState && styles.connectActionDisabled]} onPress={() => sendRequest(person)} disabled={isProcessing || person.connectionState !== null}><Text style={[styles.connectActionText, person.connectionState && styles.connectActionTextDisabled]}>{label}</Text></TouchableOpacity>);
-      }) : <Text style={styles.connectEmpty}>No matching {targetRole}s.</Text>}
-    </View> : null}
+    <View style={styles.connectSectionTabs}>
+      {roleTabs.map(([section, label]) => <TouchableOpacity key={section} accessibilityRole="tab" accessibilityState={{ selected: activeSection === section }} style={[styles.connectSectionTab, activeSection === section && styles.connectSectionTabActive]} onPress={() => setActiveSection(section)}><Text style={[styles.connectSectionTabText, activeSection === section && styles.connectSectionTabTextActive]}>{label}</Text></TouchableOpacity>)}
+    </View>
+    {activeSection === 'search' ? <>
+      <Text style={styles.connectSearchLabel}>Search by name, email, or company</Text>
+      <TextInput style={styles.connectSearchInput} value={query} onChangeText={setQuery} placeholder="Name, email, or company" placeholderTextColor="#94a3b8" autoCapitalize="none" accessibilityLabel={`Search ${targetRole}s by name, email, or company`} />
+      {query.trim().length >= 2 ? <View style={styles.connectSuggestions}>
+        {isSearching ? <Text style={styles.connectEmpty}>Searching...</Text> : suggestions.length ? suggestions.map((person) => {
+          const isProcessing = processingId === person.id;
+          const label = isProcessing ? 'Sending...' : person.connectionState === 'connected' ? 'Connected' : person.connectionState === 'sent' ? 'Request Sent' : person.connectionState === 'received' ? 'Request Received' : 'Connect';
+          return renderPerson(person, <TouchableOpacity style={[styles.connectAction, person.connectionState && styles.connectActionDisabled]} onPress={() => sendRequest(person)} disabled={isProcessing || person.connectionState !== null}><Text style={[styles.connectActionText, person.connectionState && styles.connectActionTextDisabled]}>{label}</Text></TouchableOpacity>);
+        }) : <Text style={styles.connectEmpty}>No matching {targetRole}s.</Text>}
+      </View> : null}
+    </> : null}
     {error ? <Text style={styles.connectError}>{error}</Text> : null}
 
-    <View style={styles.connectLists}>
-      <View style={styles.connectListSection}>
-        <Text style={styles.connectSectionTitle}>Incoming requests ({overview.incoming.length})</Text>
-        {overview.incoming.map((request) => renderPerson(request.person, <View style={styles.connectActionGroup}>
+    {selectedPerson ? <View style={styles.connectMemberDetails}><Text style={styles.connectPersonName}>{selectedPerson.name}</Text><Text style={styles.connectPersonMeta}>{selectedPerson.role} · {selectedPerson.email}</Text>{selectedPerson.headline ? <Text style={styles.connectPersonMeta}>{selectedPerson.headline}</Text> : null}{selectedPerson.company ? <Text style={styles.connectPersonMeta}>{selectedPerson.company}</Text> : null}<View style={styles.connectActionGroup}><TouchableOpacity style={styles.connectAction} onPress={() => onMessage?.(selectedPerson)}><Text style={styles.connectActionText}>Message</Text></TouchableOpacity>{roleConnections.some((connection) => connection.person.id === selectedPerson.id) ? <TouchableOpacity style={styles.connectSecondaryAction} onPress={removeConnection} disabled={processingId === selectedPerson.id}><Text style={styles.connectSecondaryActionText}>{processingId === selectedPerson.id ? 'Removing...' : 'Remove Connection'}</Text></TouchableOpacity> : null}<TouchableOpacity style={styles.connectSecondaryAction} onPress={() => setSelectedPerson(null)}><Text style={styles.connectSecondaryActionText}>Close</Text></TouchableOpacity></View></View> : null}
+
+    {activeSection === 'incoming' ? <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Incoming requests ({roleIncoming.length})</Text>
+        {roleIncoming.map((request) => renderPerson(request.person, <View style={styles.connectActionGroup}>
           <TouchableOpacity style={styles.connectAction} onPress={() => respondToRequest(request.requestId, 'accepted')} disabled={processingId === request.requestId}><Text style={styles.connectActionText}>{processingId === request.requestId ? 'Saving...' : 'Accept'}</Text></TouchableOpacity>
           <TouchableOpacity style={styles.connectSecondaryAction} onPress={() => respondToRequest(request.requestId, 'declined')} disabled={processingId === request.requestId}><Text style={styles.connectSecondaryActionText}>Decline</Text></TouchableOpacity>
         </View>, request.requestId))}
-        {!isLoadingOverview && !overview.incoming.length ? <Text style={styles.connectEmpty}>No incoming requests.</Text> : null}
-      </View>
-      <View style={styles.connectListSection}>
-        <Text style={styles.connectSectionTitle}>Connections ({overview.connections.length})</Text>
-        {overview.connections.map((connection) => renderPerson(connection.person, <Text style={styles.connectStatus}>Connected</Text>, connection.requestId))}
-        {!isLoadingOverview && !overview.connections.length ? <Text style={styles.connectEmpty}>Approved connections will appear here.</Text> : null}
-      </View>
-      <View style={styles.connectListSection}>
-        <Text style={styles.connectSectionTitle}>Requests sent ({overview.outgoing.length})</Text>
-        {overview.outgoing.map((request) => renderPerson(request.person, <Text style={styles.connectStatus}>Request Sent</Text>, request.requestId))}
-        {!isLoadingOverview && !overview.outgoing.length ? <Text style={styles.connectEmpty}>No pending requests sent.</Text> : null}
-      </View>
-    </View>
+        {!isLoadingOverview && !roleIncoming.length ? <Text style={styles.connectEmpty}>No incoming requests.</Text> : null}
+      </View> : null}
+    {activeSection === 'connections' ? <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Connections ({roleConnections.length})</Text>
+        {roleConnections.map((connection) => renderPerson(connection.person, <View style={styles.connectActionGroup}><TouchableOpacity style={styles.connectMessageAction} accessibilityLabel={`Message ${connection.person.name}`} onPress={() => onMessage?.(connection.person)}><Ionicons name="mail-outline" size={18} color="#245c8a" /></TouchableOpacity><Text style={styles.connectStatus}>Connected</Text></View>, connection.requestId))}
+        {!isLoadingOverview && !roleConnections.length ? <Text style={styles.connectEmpty}>Approved connections will appear here.</Text> : null}
+      </View> : null}
+    {activeSection === 'sent' ? <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Requests sent ({roleOutgoing.length})</Text>
+        {roleOutgoing.map((request) => renderPerson(request.person, <View style={styles.connectActionGroup}><Text style={styles.connectStatus}>Request Sent</Text><TouchableOpacity style={styles.connectSecondaryAction} onPress={() => cancelRequest(request.requestId)} disabled={processingId === request.requestId}><Text style={styles.connectSecondaryActionText}>{processingId === request.requestId ? 'Canceling...' : 'Cancel Request'}</Text></TouchableOpacity></View>, request.requestId))}
+        {!isLoadingOverview && !roleOutgoing.length ? <Text style={styles.connectEmpty}>No pending requests sent.</Text> : null}
+      </View> : null}
+    {activeSection === 'referrals' && targetRole === 'candidate' ? <View style={styles.connectListSection}>
+        <Text style={styles.connectSectionTitle}>Job referrals ({referrals.length})</Text>
+        {referrals.map((referral) => <View style={styles.connectReferral} key={referral.id}><View style={styles.connectReferralDetails}><Text style={styles.connectPersonName}>{referral.job.title}</Text><Text style={styles.connectPersonMeta}>{referral.job.company} · Referred by {referral.referrer.name}</Text><Text style={styles.connectPersonMeta}>{referral.referrer.email}</Text></View>{appliedJobIds.has(String(referral.job.id)) ? <Text style={styles.connectStatus}>Applied</Text> : referral.job.source === 'career-nexus' ? <TouchableOpacity style={styles.connectAction} onPress={() => setSelectedReferral(referral.job)}><Text style={styles.connectActionText}>CN Apply</Text></TouchableOpacity> : <TouchableOpacity style={styles.connectAction} onPress={() => applyReferral(referral.job)} disabled={processingId === String(referral.job.id)}><Text style={styles.connectActionText}>{processingId === String(referral.job.id) ? 'Saving...' : 'Apply'}</Text></TouchableOpacity>}</View>)}
+        {!referrals.length ? <Text style={styles.connectEmpty}>No job referrals yet.</Text> : null}
+      </View> : null}
+    {selectedReferral ? <MobileJobCard job={selectedReferral} isApplied={false} onApply={onApplyReferral} onApplyRecruiterJob={onApplyRecruiterJob} email={email} profile={profile} startInApplication onCNApplyClose={() => setSelectedReferral(null)} /> : null}
   </View>;
 }
 
@@ -868,34 +980,352 @@ function ResumeSection({ resume, onUpload, onDownload, onDelete }) {
   </View>;
 }
 
-function MobileJobCard({ job, isApplied, onApply }) {
+function MobileJobReferralControl({ job, email }) {
+  const [candidates, setCandidates] = useState([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [processingId, setProcessingId] = useState('');
+  const [message, setMessage] = useState('');
+
+  const openReferrals = async () => {
+    setMessage('');
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    setIsLoading(true);
+    setIsOpen(true);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect?email=${encodeURIComponent(email)}`, { headers: await getConnectAuthHeaders() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to load connections.');
+      setCandidates((data.connections || []).map((connection) => connection.person).filter((person) => person.role === 'candidate'));
+    } catch (error) {
+      setMessage(error.message || 'Unable to load connections.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const referToCandidate = async (candidate) => {
+    setProcessingId(candidate.id);
+    setMessage('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/referrals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() },
+        body: JSON.stringify({ email, targetEmail: candidate.email, job }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to send this referral.');
+      setMessage(`Referred to ${candidate.name}.`);
+    } catch (error) {
+      setMessage(error.message || 'Unable to send this referral.');
+    } finally {
+      setProcessingId('');
+    }
+  };
+
+  return <View style={styles.mobileJobReferralControl}>
+    <TouchableOpacity style={styles.mobileJobReferButton} onPress={openReferrals}><Ionicons name="people-outline" size={16} color="#245c8a" /><Text style={styles.mobileJobReferText}>Refer</Text></TouchableOpacity>
+    {isOpen ? <View style={styles.mobileJobReferralOptions}>
+      {isLoading ? <Text style={styles.connectEmpty}>Loading connections...</Text> : candidates.length ? candidates.map((candidate) => <TouchableOpacity key={candidate.id} style={styles.mobileJobReferralOption} onPress={() => referToCandidate(candidate)} disabled={Boolean(processingId)}><Text style={styles.mobileJobReferralOptionText}>{processingId === candidate.id ? 'Sending...' : candidate.name}</Text></TouchableOpacity>) : <Text style={styles.connectEmpty}>No connected candidates yet.</Text>}
+      {message ? <Text style={styles.mobileJobReferralMessage}>{message}</Text> : null}
+    </View> : null}
+  </View>;
+}
+
+function MobileJobCard({ job, isApplied, onApply, onApplyRecruiterJob, email, profile, startInApplication = false, onCNApplyClose }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const [showApplication, setShowApplication] = useState(startInApplication);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [applicationError, setApplicationError] = useState('');
+  const [draftSaved, setDraftSaved] = useState(false);
+  const applicationDraftKey = `cn-application-draft:${job.recruiterJobId}`;
+  const currentEmployment = profile?.employmentDetails?.find((entry) => entry.isCurrent);
+  const [applicationDetails, setApplicationDetails] = useState({
+    fullName: profile?.name || '',
+    email: profile?.email || email,
+    currentCompany: currentEmployment?.companyName || profile?.companyName || profile?.currentCompany || '',
+    expectedSalary: profile?.expectedSalaryLpa || '',
+    actualSalary: '',
+    totalExperienceYears: profile?.totalExperienceYears || '',
+    relevantExperienceYears: '',
+    currentlyServingNotice: 'No',
+    noticePeriodDays: '',
+    includeResume: Boolean(profile?.resume),
+  });
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(applicationDraftKey).then((savedDraft) => {
+      if (active && savedDraft) {
+        try { setApplicationDetails((current) => ({ ...current, ...JSON.parse(savedDraft) })); setDraftSaved(true); } catch (error) { console.warn('Unable to restore job application draft:', error); }
+      }
+    }).catch((error) => console.warn('Unable to load job application draft:', error));
+    return () => { active = false; };
+  }, [applicationDraftKey]);
+  useEffect(() => {
+    if (!profile?.resume) return undefined;
+    let active = true;
+    AsyncStorage.getItem(applicationDraftKey).then((savedDraft) => {
+      if (active && !savedDraft) setApplicationDetails((current) => ({ ...current, includeResume: true }));
+    }).catch((error) => console.warn('Unable to check application draft preferences:', error));
+    return () => { active = false; };
+  }, [applicationDraftKey, profile?.resume]);
+  const updateApplication = (field, value) => setApplicationDetails((current) => ({ ...current, [field]: value }));
+  const submitRecruiterApplication = async () => {
+    setIsSubmitting(true);
+    setApplicationError('');
+    try {
+      await onApplyRecruiterJob(job, applicationDetails);
+      await AsyncStorage.removeItem(applicationDraftKey);
+      setShowApplication(false);
+      onCNApplyClose?.();
+    } catch (error) {
+      setApplicationError(error.message || 'Unable to submit application.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  const saveApplicationDraft = async () => {
+    try {
+      await AsyncStorage.setItem(applicationDraftKey, JSON.stringify(applicationDetails));
+      setDraftSaved(true);
+    } catch (error) {
+      setApplicationError(error.message || 'Unable to save this application draft.');
+    }
+  };
   return <View style={styles.jobCard}>
     <View style={styles.jobHeader}>
       <View style={styles.jobTitleBlock}><Text style={styles.jobTitle}>{job.title}</Text><Text style={styles.jobCompany}>{job.company}</Text></View>
       <Text style={styles.jobMatchBadge}>{job.matchScore}% shortlist</Text>
     </View>
     <View style={styles.jobMetaRow}><Text style={[styles.jobMeta, styles.jobLocation]} numberOfLines={1} ellipsizeMode="tail" accessibilityLabel={job.location || 'Location not listed'}>{job.location || 'Location not listed'}</Text><Text style={[styles.jobMeta, styles.jobType]} numberOfLines={1} ellipsizeMode="tail" accessibilityLabel={job.type || 'Type not listed'}>{job.type || 'Type not listed'}</Text></View>
+    {job.source === 'career-nexus' && showDetails ? <View style={styles.recruiterJobDescription}><Text style={styles.jobCompany}>{job.description}</Text></View> : null}
     <View style={styles.jobActions}>
-      <TouchableOpacity style={styles.jobViewButton} onPress={() => Linking.openURL(job.url)}><Text style={styles.jobViewButtonText}>View listing</Text></TouchableOpacity>
-      {isApplied ? <Text style={styles.jobAppliedStatus}>Applied</Text> : <TouchableOpacity style={styles.jobApplyButton} onPress={() => onApply(job)}><Text style={styles.jobApplyButtonText}>Apply</Text></TouchableOpacity>}
+      {job.source === 'career-nexus' ? <TouchableOpacity style={styles.jobViewButton} onPress={() => setShowDetails((value) => !value)}><Text style={styles.jobViewButtonText}>{showDetails ? 'Hide details' : 'View Details'}</Text></TouchableOpacity> : <TouchableOpacity style={styles.jobViewButton} onPress={() => Linking.openURL(job.url)}><Text style={styles.jobViewButtonText}>View listing</Text></TouchableOpacity>}
+      <MobileJobReferralControl job={job} email={email} />
+      {job.source === 'career-nexus' ? (job.status === 'closed' ? <Text style={styles.jobClosedStatus}>Closed</Text> : isApplied ? <Text style={styles.jobAppliedStatus}>Applied</Text> : <TouchableOpacity style={styles.jobApplyButton} onPress={() => setShowApplication(true)}><Text style={styles.jobApplyButtonText}>CN Apply</Text></TouchableOpacity>) : (isApplied ? <Text style={styles.jobAppliedStatus}>Applied</Text> : <TouchableOpacity style={styles.jobApplyButton} onPress={() => onApply(job)}><Text style={styles.jobApplyButtonText}>Apply</Text></TouchableOpacity>)}
     </View>
+    {job.source === 'career-nexus' ? <Modal visible={showApplication} animationType="slide" onRequestClose={() => { setShowApplication(false); onCNApplyClose?.(); }}>
+      <SafeAreaView style={styles.cnApplicationModal}><ScrollView contentContainerStyle={styles.cnApplicationContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>CN Apply</Text><TouchableOpacity onPress={() => { setShowApplication(false); onCNApplyClose?.(); }} accessibilityLabel="Cancel application"><Ionicons name="close" size={22} color="#526779" /></TouchableOpacity></View>
+        <Text style={styles.jobTitle}>{job.title}</Text><Text style={styles.jobCompany}>{job.company} · {job.location} · {job.type}</Text><Text style={styles.profileRecordText}>{job.description}</Text>
+        {[
+          ['Full name', 'fullName'], ['Email', 'email'], ['Current company', 'currentCompany'], ['Expected salary', 'expectedSalary'], ['Actual salary', 'actualSalary'], ['Total years of experience', 'totalExperienceYears'], ['Relevant years of experience', 'relevantExperienceYears'],
+        ].map(([label, field]) => <View style={styles.profileField} key={field}><Text style={styles.locationLabel}>{label}</Text><TextInput style={[styles.input, styles.profileInput]} value={String(applicationDetails[field] || '')} onChangeText={(value) => updateApplication(field, value)} keyboardType={['totalExperienceYears', 'relevantExperienceYears'].includes(field) ? 'decimal-pad' : 'default'} /></View>)}
+        <View style={styles.profileField}><Text style={styles.locationLabel}>Currently serving notice?</Text><View style={styles.choiceRow}>{['Yes', 'No'].map((choice) => <TouchableOpacity key={choice} style={[styles.choiceButton, applicationDetails.currentlyServingNotice === choice && styles.choiceButtonActive]} onPress={() => updateApplication('currentlyServingNotice', choice)}><Text style={[styles.choiceText, applicationDetails.currentlyServingNotice === choice && styles.choiceTextActive]}>{choice}</Text></TouchableOpacity>)}</View></View>
+        <View style={styles.profileField}><Text style={styles.locationLabel}>How early can you join (days)?</Text><TextInput style={[styles.input, styles.profileInput]} value={String(applicationDetails.noticePeriodDays || '')} onChangeText={(value) => updateApplication('noticePeriodDays', value)} keyboardType="number-pad" /></View>
+        <TouchableOpacity style={styles.resumeChoice} onPress={() => updateApplication('includeResume', !applicationDetails.includeResume)} disabled={!profile?.resume}><Ionicons name={applicationDetails.includeResume ? 'checkbox' : 'square-outline'} size={20} color="#245c8a" /><Text style={styles.profileRecordText}>{profile?.resume ? `Attach resume: ${profile.resume.fileName}` : 'No resume on your profile'}</Text></TouchableOpacity>
+        {applicationError ? <Text style={styles.connectError}>{applicationError}</Text> : null}
+        {draftSaved ? <Text style={styles.connectStatus}>Draft saved on this device.</Text> : null}
+        <View style={styles.buttonRow}><TouchableOpacity style={styles.secondaryButton} onPress={() => { setShowApplication(false); onCNApplyClose?.(); }}><Text style={styles.secondaryButtonText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={styles.secondaryButton} onPress={saveApplicationDraft}><Text style={styles.secondaryButtonText}>Save</Text></TouchableOpacity><TouchableOpacity style={styles.primaryButton} onPress={submitRecruiterApplication} disabled={isSubmitting}><Text style={styles.primaryButtonText}>{isSubmitting ? 'Submitting...' : 'Submit application'}</Text></TouchableOpacity></View>
+      </ScrollView></SafeAreaView>
+    </Modal> : null}
   </View>;
 }
 
-function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLogout, onUpdateProfilePicture, onUploadResume, onDownloadResume, onDeleteResume, onApplyToJob }) {
+function MobileRecruiterHome({ email, profile }) {
+  const [openings, setOpenings] = useState([]);
+  const [form, setForm] = useState({ position: '', location: '', workMode: 'Full-time', description: '', companyAbout: '' });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [processingId, setProcessingId] = useState('');
+  const [error, setError] = useState('');
+  const companyName = profile.employmentDetails?.find((entry) => entry.isCurrent)?.companyName || profile.companyName || profile.currentCompany || '';
+  const update = (field) => (value) => setForm((current) => ({ ...current, [field]: value }));
+  const loadOpenings = async () => {
+    const response = await fetch(`${getApiBaseUrl()}/jobs/recruiter?email=${encodeURIComponent(email)}`, { headers: await getConnectAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Unable to load job openings.');
+    setOpenings(Array.isArray(data) ? data : []);
+  };
+  useEffect(() => {
+    let active = true;
+    getConnectAuthHeaders().then((headers) => fetch(`${getApiBaseUrl()}/jobs/recruiter?email=${encodeURIComponent(email)}`, { headers }))
+      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || 'Unable to load job openings.'); if (active) setOpenings(Array.isArray(data) ? data : []); })
+      .catch((error) => console.warn('Unable to load recruiter openings:', error))
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [email]);
+  const postOpening = async () => {
+    setIsSaving(true);
+    setError('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/jobs/recruiter`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() }, body: JSON.stringify({ email, ...form }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to post job opening.');
+      setOpenings((current) => [data, ...current]);
+      setForm({ position: '', location: '', workMode: 'Full-time', description: '', companyAbout: '' });
+    } catch (error) { setError(error.message || 'Unable to post job opening.'); }
+    finally { setIsSaving(false); }
+  };
+  const closeOpening = async (opening) => {
+    setProcessingId(opening.recruiterJobId);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/jobs/recruiter/${encodeURIComponent(opening.recruiterJobId)}/close`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() }, body: JSON.stringify({ email }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to close job.');
+      setOpenings((current) => current.map((job) => job.recruiterJobId === opening.recruiterJobId ? { ...job, status: 'closed' } : job));
+    } catch (error) { setError(error.message || 'Unable to close job.'); }
+    finally { setProcessingId(''); }
+  };
+  return <View style={styles.jobsSection}>
+    <Text style={styles.sectionTitle}>Post a job opening</Text><Text style={styles.jobsIntro}>Company name uses your current organization.</Text>
+    <TextInput style={[styles.input, styles.profileInput]} value={companyName} editable={false} placeholder="Current organization" placeholderTextColor="#94a3b8" />
+    <TextInput style={[styles.input, styles.profileInput]} value={form.position} onChangeText={update('position')} placeholder="Position for opening" placeholderTextColor="#94a3b8" />
+    <TextInput style={[styles.input, styles.profileInput]} value={form.location} onChangeText={update('location')} placeholder="Location" placeholderTextColor="#94a3b8" />
+    <View style={styles.choiceRow}>{['Full-time', 'Hybrid'].map((mode) => <TouchableOpacity key={mode} style={[styles.choiceButton, form.workMode === mode && styles.choiceButtonActive]} onPress={() => update('workMode')(mode)}><Text style={[styles.choiceText, form.workMode === mode && styles.choiceTextActive]}>{mode}</Text></TouchableOpacity>)}</View>
+    <TextInput style={[styles.input, styles.profileInput]} value={form.description} onChangeText={update('description')} placeholder="Job description" placeholderTextColor="#94a3b8" multiline />
+    <TextInput style={[styles.input, styles.profileInput]} value={form.companyAbout} onChangeText={update('companyAbout')} placeholder="About the company" placeholderTextColor="#94a3b8" multiline />
+    {error ? <Text style={styles.connectError}>{error}</Text> : null}
+    <TouchableOpacity style={styles.primaryButton} onPress={postOpening} disabled={isSaving || !companyName || !form.position.trim() || !form.location.trim() || !form.description.trim() || !form.companyAbout.trim()}><Text style={styles.primaryButtonText}>{isSaving ? 'Posting...' : 'Post opening'}</Text></TouchableOpacity>
+    <View style={styles.recruiterOpeningsHeader}><Text style={styles.sectionTitle}>Posted jobs</Text><TouchableOpacity onPress={() => loadOpenings().catch((error) => setError(error.message))}><Text style={styles.linkText}>Refresh</Text></TouchableOpacity></View>
+    {isLoading ? <Text style={styles.libraryStatusText}>Loading posted jobs...</Text> : null}
+    {!isLoading && !openings.length ? <Text style={styles.libraryStatusText}>No job openings posted yet.</Text> : null}
+    {openings.map((opening) => <View style={styles.recruiterOpeningTile} key={opening.recruiterJobId}><View style={styles.recruiterOpeningDetails}><Text style={styles.jobTitle}>{opening.title}</Text><Text style={styles.jobCompany}>{opening.company} · {opening.location} · {opening.type}</Text><Text style={styles.profileRecordText}>{opening.applicantsCount || 0} applicants</Text></View>{opening.status === 'open' ? <TouchableOpacity style={styles.connectSecondaryAction} onPress={() => closeOpening(opening)} disabled={processingId === opening.recruiterJobId}><Text style={styles.connectSecondaryActionText}>{processingId === opening.recruiterJobId ? 'Closing...' : 'Close job'}</Text></TouchableOpacity> : <Text style={styles.connectStatus}>Closed</Text>}</View>)}
+  </View>;
+}
+
+function MobileMessageCompose({ email, person, job, onCancel, onSent }) {
+  const [body, setBody] = useState('');
+  const [error, setError] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const send = async () => {
+    setError(''); setIsSending(true);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() }, body: JSON.stringify({ email, targetEmail: person.email, body, ...(job ? { job } : {}) }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to send message.');
+      onSent?.();
+    } catch (sendError) { setError(sendError.message || 'Unable to send message.'); }
+    finally { setIsSending(false); }
+  };
+  return <Modal visible animationType="slide" onRequestClose={onCancel}><SafeAreaView style={styles.cnApplicationModal}><ScrollView contentContainerStyle={styles.cnApplicationContent} keyboardShouldPersistTaps="handled"><View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Message {person.name}</Text><TouchableOpacity onPress={onCancel} accessibilityLabel="Cancel message"><Ionicons name="close" size={22} color="#526779" /></TouchableOpacity></View>{job ? <View style={styles.messageJobTile}><Text style={styles.jobTitle}>{job.title}</Text><Text style={styles.jobCompany}>{job.company} · {job.location}</Text></View> : null}<TextInput style={[styles.input, styles.profileInput]} value={body} onChangeText={setBody} placeholder="Your message" placeholderTextColor="#94a3b8" multiline maxLength={5000} />{error ? <Text style={styles.connectError}>{error}</Text> : null}<View style={styles.buttonRow}><TouchableOpacity style={styles.secondaryButton} onPress={onCancel}><Text style={styles.secondaryButtonText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={styles.primaryButton} onPress={send} disabled={isSending || !body.trim()}><Text style={styles.primaryButtonText}>{isSending ? 'Sending...' : 'Send'}</Text></TouchableOpacity></View></ScrollView></SafeAreaView></Modal>;
+}
+
+function MobileRecruiterApplicationsView({ email }) {
+  const [openings, setOpenings] = useState([]);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [selectedApplication, setSelectedApplication] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [messageTarget, setMessageTarget] = useState(null);
+  useEffect(() => {
+    let active = true;
+    getConnectAuthHeaders().then((headers) => fetch(`${getApiBaseUrl()}/jobs/recruiter/applications?email=${encodeURIComponent(email)}`, { headers }))
+      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || 'Unable to load applications.'); if (active) setOpenings(Array.isArray(data) ? data : []); })
+      .catch((error) => console.warn('Unable to load recruiter applications:', error))
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [email]);
+  const updateStatus = async (applicationId, status) => {
+    const response = await fetch(`${getApiBaseUrl()}/jobs/recruiter/applications/${encodeURIComponent(applicationId)}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() }, body: JSON.stringify({ email, status }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Unable to update application status.');
+    setSelectedApplication((current) => current ? { ...current, reviewStatus: status } : current);
+    setOpenings((current) => current.map((opening) => ({ ...opening, applicants: opening.applicants.map((application) => application.id === applicationId ? { ...application, reviewStatus: status } : application) })));
+  };
+  const openApplication = async (application) => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/jobs/recruiter/applications/${encodeURIComponent(application.id)}?email=${encodeURIComponent(email)}`, { headers: await getConnectAuthHeaders() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to load candidate details.');
+      setSelectedApplication(data);
+      await updateStatus(application.id, 'viewed');
+    } catch (error) { console.warn('Unable to load recruiter applicant:', error); }
+  };
+  const action = (status) => selectedApplication && updateStatus(selectedApplication.id, status).catch((error) => console.warn(error));
+  const openResume = async () => {
+    const url = selectedApplication?.resume?.downloadUrl;
+    if (!url) return;
+    await Linking.openURL(url);
+    await action('resume_downloaded');
+  };
+  return <View style={styles.jobsSection}>
+    <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Applications Received</Text><Text style={styles.linkText}>Ranked by match score</Text></View>
+    {isLoading ? <Text style={styles.libraryStatusText}>Loading applications...</Text> : null}
+    {!isLoading && !openings.length ? <Text style={styles.libraryStatusText}>Posted job applications will appear here.</Text> : null}
+    {openings.map((opening) => <View key={opening.recruiterJobId} style={styles.recruiterApplicationGroup}><TouchableOpacity style={styles.recruiterOpeningTile} onPress={() => { setSelectedJob(opening); setSelectedApplication(null); }}><View style={styles.recruiterOpeningDetails}><Text style={styles.jobTitle}>{opening.title}</Text><Text style={styles.jobCompany}>{opening.company} · {opening.location}</Text><Text style={styles.profileRecordText}>{opening.applicants.length} applicants</Text></View><Ionicons name={selectedJob?.id === opening.id ? 'chevron-up' : 'chevron-down'} size={20} color="#526779" /></TouchableOpacity>{selectedJob?.id === opening.id ? opening.applicants.map((application) => <TouchableOpacity style={styles.recruiterApplicantTile} key={application.id} onPress={() => openApplication(application)}><View style={styles.recruiterOpeningDetails}><Text style={styles.connectPersonName}>{application.candidate.name}</Text><Text style={styles.connectPersonMeta}>{application.candidate.headline || application.candidate.email}</Text></View><Text style={styles.jobMatchBadge}>{application.matchScore}%</Text></TouchableOpacity>) : null}</View>)}
+    {selectedApplication ? <View style={styles.recruiterCandidateDetail}><Text style={styles.sectionTitle}>{selectedApplication.candidate.name}</Text><Text style={styles.connectPersonMeta}>{selectedApplication.candidate.email} · {selectedJob?.title}</Text><Text style={styles.jobMatchBadge}>{selectedJob?.applicants.find((item) => item.id === selectedApplication.id)?.matchScore || 0}% match</Text>{Object.entries(selectedApplication.candidate.profile || {}).filter(([key, value]) => !['resume', 'photo', 'appliedJobs', 'skills', 'languages', 'employmentDetails', 'majorProjects'].includes(key) && value && typeof value !== 'object').map(([key, value]) => <Text style={styles.profileDetail} key={key}><Text style={styles.detailLabel}>{key}: </Text>{String(value)}</Text>)}{selectedApplication.candidate.profile?.skills?.length ? <Text style={styles.profileDetail}>Skills: {selectedApplication.candidate.profile.skills.join(', ')}</Text> : null}{selectedApplication.candidate.profile?.languages?.length ? <Text style={styles.profileDetail}>Languages: {selectedApplication.candidate.profile.languages.join(', ')}</Text> : null}{selectedApplication.candidate.profile?.employmentDetails?.map((employment, index) => <View style={styles.profileRecord} key={`${employment.companyName}-${index}`}><Text style={styles.profileRecordTitle}>{employment.companyName}</Text><Text style={styles.profileRecordText}>{employment.jobTitle} · {employment.employmentType}</Text><Text style={styles.profileRecordText}>{employment.joiningDate}{employment.isCurrent ? ' · Current' : employment.relievingDate ? ` to ${employment.relievingDate}` : ''}</Text><Text style={styles.profileRecordText}>{employment.jobProfile}</Text></View>)}<Text style={styles.profileDetail}>Expected salary: {selectedApplication.applicationDetails.expectedSalary}</Text><Text style={styles.profileDetail}>Actual salary: {selectedApplication.applicationDetails.actualSalary}</Text><Text style={styles.profileDetail}>Total experience: {selectedApplication.applicationDetails.totalExperienceYears} years</Text><Text style={styles.profileDetail}>Relevant experience: {selectedApplication.applicationDetails.relevantExperienceYears} years</Text><Text style={styles.profileDetail}>Serving notice: {selectedApplication.applicationDetails.currentlyServingNotice}</Text><Text style={styles.profileDetail}>Can join in: {selectedApplication.applicationDetails.noticePeriodDays} days</Text><View style={styles.connectActionGroup}><TouchableOpacity style={styles.connectSecondaryAction} onPress={openResume} disabled={!selectedApplication.resume?.downloadUrl}><Text style={styles.connectSecondaryActionText}>{selectedApplication.resume?.resume?.fileName ? 'Download resume' : 'No resume'}</Text></TouchableOpacity><TouchableOpacity style={styles.connectSecondaryAction} onPress={() => action('viewed')}><Text style={styles.connectSecondaryActionText}>Viewed</Text></TouchableOpacity><TouchableOpacity style={styles.connectAction} onPress={() => action('shortlisted')}><Text style={styles.connectActionText}>Shortlist</Text></TouchableOpacity><TouchableOpacity style={styles.connectSecondaryAction} onPress={() => action('not_shortlisted')}><Text style={styles.connectSecondaryActionText}>Not shortlisted</Text></TouchableOpacity><TouchableOpacity style={styles.connectSecondaryAction} onPress={() => Linking.openURL(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(selectedApplication.candidate.email)}`)}><Text style={styles.connectSecondaryActionText}>Contact via Gmail</Text></TouchableOpacity><TouchableOpacity style={styles.connectSecondaryAction} onPress={() => setMessageTarget({ person: selectedApplication.candidate, job: selectedApplication.job })}><Text style={styles.connectSecondaryActionText}>Message</Text></TouchableOpacity></View></View> : null}
+    {messageTarget ? <MobileMessageCompose email={email} person={messageTarget.person} job={messageTarget.job} onCancel={() => setMessageTarget(null)} onSent={() => setMessageTarget(null)} /> : null}
+  </View>;
+}
+
+function MobileMessagesView({ email, role, onOpenPerson, initialPerson, onConsumeInitialPerson }) {
+  const [messages, setMessages] = useState([]);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [target, setTarget] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const otherRole = role === 'recruiter' ? 'candidate' : 'recruiter';
+  useEffect(() => {
+    if (!initialPerson) return;
+    setTarget(initialPerson);
+    onConsumeInitialPerson?.();
+  }, [initialPerson]);
+  const loadMessages = async () => {
+    const response = await fetch(`${getApiBaseUrl()}/connect/messages?email=${encodeURIComponent(email)}`, { headers: await getConnectAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Unable to load messages.');
+    setMessages(Array.isArray(data) ? data : []);
+  };
+  useEffect(() => {
+    let active = true;
+    getConnectAuthHeaders().then((headers) => fetch(`${getApiBaseUrl()}/connect/messages?email=${encodeURIComponent(email)}`, { headers }))
+      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || 'Unable to load messages.'); if (active) setMessages(Array.isArray(data) ? data : []); })
+      .catch((error) => console.warn('Unable to load messages:', error))
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [email]);
+  const searchPeople = async () => {
+    if (query.trim().length < 2) return;
+    try {
+      const params = new URLSearchParams({ email, role: otherRole, q: query.trim() });
+      const response = await fetch(`${getApiBaseUrl()}/connect/search?${params}`, { headers: await getConnectAuthHeaders() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to search members.');
+      setResults(Array.isArray(data) ? data : []);
+    } catch (error) { console.warn('Unable to search message recipients:', error); }
+  };
+  const approve = async (candidateEmail) => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/connect/messages/permissions/${encodeURIComponent(candidateEmail)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() }, body: JSON.stringify({ email }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to approve messages.');
+      await loadMessages();
+    } catch (error) { console.warn('Unable to approve messages:', error); }
+  };
+  return <View style={styles.jobsSection}><Text style={styles.sectionTitle}>Messages</Text><View style={styles.messageRecipientSearch}><TextInput style={[styles.input, styles.profileInput]} value={query} onChangeText={setQuery} placeholder={`Search ${otherRole}s`} placeholderTextColor="#94a3b8" /><TouchableOpacity style={styles.connectSecondaryAction} onPress={searchPeople}><Text style={styles.connectSecondaryActionText}>Search</Text></TouchableOpacity></View>{results.map((person) => <TouchableOpacity key={person.id} style={styles.recruiterApplicantTile} onPress={() => setTarget(person)}><Text style={styles.connectPersonName}>{person.name} · {person.email}</Text></TouchableOpacity>)}{isLoading ? <Text style={styles.libraryStatusText}>Loading messages...</Text> : null}{!isLoading && !messages.length ? <Text style={styles.libraryStatusText}>Messages will appear here.</Text> : null}{messages.map((message) => { const person = message.isReceived ? message.sender : message.recipient; const needsApproval = role === 'recruiter' && message.isReceived && message.sender.role === 'candidate' && message.permissionStatus !== 'approved'; return <View style={styles.messageItem} key={message.id}><TouchableOpacity onPress={() => onOpenPerson(person)}><Text style={styles.connectPersonName}>{person.name} · {new Date(message.createdAt).toLocaleDateString()}</Text></TouchableOpacity><Text style={styles.profileDetail}>{message.body}</Text>{message.job && Object.keys(message.job).length ? <View style={styles.messageJobTile}><Text style={styles.connectPersonName}>{message.job.title}</Text><Text style={styles.connectPersonMeta}>{message.job.company} · {message.job.location}</Text></View> : null}{needsApproval ? <TouchableOpacity style={styles.connectAction} onPress={() => approve(message.sender.email)}><Text style={styles.connectActionText}>Approve message request</Text></TouchableOpacity> : null}</View>; })}{target ? <MobileMessageCompose email={email} person={target} onCancel={() => setTarget(null)} onSent={() => { setTarget(null); loadMessages().catch(console.warn); }} /> : null}</View>;
+}
+
+function MobileNotificationsView({ email, onOpenApplications, onOpenMessages }) {
+  const [notifications, setNotifications] = useState([]);
+  useEffect(() => {
+    let active = true;
+    getConnectAuthHeaders().then((headers) => fetch(`${getApiBaseUrl()}/connect/notifications?email=${encodeURIComponent(email)}`, { headers }))
+      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || 'Unable to load notifications.'); if (active) setNotifications(Array.isArray(data) ? data : []); })
+      .catch((error) => console.warn('Unable to load notifications:', error));
+    return () => { active = false; };
+  }, [email]);
+  return <View style={styles.jobsSection}><Text style={styles.sectionTitle}>Notifications</Text>{!notifications.length ? <Text style={styles.libraryStatusText}>No notifications yet.</Text> : notifications.map((notification) => <TouchableOpacity key={notification.id} style={styles.notificationItem} onPress={notification.type === 'application' ? onOpenApplications : onOpenMessages}><Text style={styles.connectPersonName}>{notification.title}</Text><Text style={styles.connectPersonMeta}>{notification.description}</Text><Text style={styles.connectPersonMeta}>{new Date(notification.createdAt).toLocaleDateString()}</Text></TouchableOpacity>)}</View>;
+}
+
+function HomeDashboard({ profile, email, role, initialNav, onEditProfileSection, onLogout, onUpdateProfilePicture, onUploadResume, onDownloadResume, onDeleteResume, onApplyToJob }) {
   const [activeTab, setActiveTab] = useState('Applied Jobs');
   const [activeNav, setActiveNav] = useState(initialNav);
   const [jobSearchQuery, setJobSearchQuery] = useState('');
   const [selectedPhoto, setSelectedPhoto] = useState(profile.photo);
+  const [connectFocusPerson, setConnectFocusPerson] = useState(null);
+  const [messageRecipient, setMessageRecipient] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [appliedJobs, setAppliedJobs] = useState([]);
   const [careerPortals, setCareerPortals] = useState([]);
-  const [jobFeedStatus, setJobFeedStatus] = useState(null);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [hasMoreRecommendations, setHasMoreRecommendations] = useState(false);
   const [isLoadingMoreRecommendations, setIsLoadingMoreRecommendations] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState('');
-  const [jobsError, setJobsError] = useState('');
+  const dashboardNavigationItems = role === 'recruiter'
+    ? [{ label: 'Home', icon: 'home-outline', activeIcon: 'home' }, { label: 'Applications', icon: 'documents-outline' }, { label: 'Connect', icon: 'people-outline' }, { label: 'Messages', icon: 'chatbubble-ellipses-outline' }, { label: 'Profile', icon: 'person-outline' }]
+    : [...navigationItems.slice(0, 3), { label: 'Messages', icon: 'chatbubble-ellipses-outline' }, ...navigationItems.slice(3)];
 
   const handleJobSearchChange = (value) => {
     setJobSearchQuery(value);
@@ -909,8 +1339,6 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
     if (!email) return undefined;
     let isActive = true;
     setIsLoadingJobs(true);
-    setJobsError('');
-    setJobFeedStatus(null);
     setRecommendations([]);
     setHasMoreRecommendations(false);
     fetch(`${getApiBaseUrl()}/jobs/recommendations?email=${encodeURIComponent(email)}&limit=${JOB_RECOMMENDATION_PAGE_SIZE}&offset=0`).then(async (response) => {
@@ -919,10 +1347,9 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
       if (isActive) {
         setRecommendations(Array.isArray(data.jobs) ? data.jobs : []);
         setHasMoreRecommendations(Boolean(data.hasMore));
-        setJobFeedStatus({ diagnostic: data.diagnostic || '', sourcesFailed: Array.isArray(data.sourcesFailed) ? data.sourcesFailed : [] });
       }
     }).catch((error) => {
-      if (isActive) setJobsError(error.message || 'Unable to load jobs.');
+      if (isActive) console.warn('Unable to load job recommendations:', error);
     }).finally(() => {
       if (isActive) setIsLoadingJobs(false);
     });
@@ -946,7 +1373,6 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
   const loadMoreRecommendations = async () => {
     if (isLoadingMoreRecommendations || !hasMoreRecommendations) return;
     setIsLoadingMoreRecommendations(true);
-    setLoadMoreError('');
     try {
       const offset = recommendations.length;
       const response = await fetch(`${getApiBaseUrl()}/jobs/recommendations?email=${encodeURIComponent(email)}&limit=${JOB_RECOMMENDATION_PAGE_SIZE}&offset=${offset}`);
@@ -956,14 +1382,14 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
       setRecommendations((currentJobs) => [...currentJobs, ...nextJobs.filter((job) => !currentJobs.some((currentJob) => currentJob.id === job.id))]);
       setHasMoreRecommendations(Boolean(data.hasMore));
     } catch (error) {
-      setLoadMoreError(error.message || 'Unable to load more jobs.');
+      console.warn('Unable to load more job recommendations:', error);
     } finally {
       setIsLoadingMoreRecommendations(false);
     }
   };
 
-  const appliedIds = new Set(appliedJobs.map((job) => job.id));
-  const matchingJobs = recommendations.filter((job) => job.matchScore > 0 && !appliedIds.has(job.id));
+  const appliedIds = new Set(appliedJobs.map((job) => String(job.id)));
+  const matchingJobs = recommendations.filter((job) => job.matchScore > 0 && !appliedIds.has(String(job.id)));
   const homeJobs = matchingJobs;
   const recommendedJobs = matchingJobs;
   const jobGroups = { 'Applied Jobs': appliedJobs, 'Recommended Jobs': recommendedJobs };
@@ -981,8 +1407,25 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
       setAppliedJobs((currentJobs) => [application, ...currentJobs.filter((currentJob) => currentJob.id !== application.id)]);
       await Linking.openURL(job.url);
     } catch (error) {
-      Alert.alert('Unable to apply', error.message || 'Please try again.');
+      console.warn('Unable to apply to job:', error);
     }
+  };
+
+  const applyToReferral = async (job) => {
+    const application = await onApplyToJob(job);
+    setAppliedJobs((currentJobs) => [application, ...currentJobs.filter((currentJob) => String(currentJob.id) !== String(application.id))]);
+    await Linking.openURL(job.url);
+  };
+
+  const applyToRecruiterJob = async (job, details) => {
+    const response = await fetch(`${getApiBaseUrl()}/jobs/recruiter/${encodeURIComponent(job.recruiterJobId)}/applications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...await getConnectAuthHeaders() },
+      body: JSON.stringify({ email, details }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Unable to submit application.');
+    setAppliedJobs((currentJobs) => [data, ...currentJobs.filter((currentJob) => String(currentJob.id) !== String(data.id))]);
   };
 
   const editProfilePicture = async () => {
@@ -1019,14 +1462,17 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
           <Image source={require('./assets/companylogo-after-login.png')} style={styles.dashboardLogo} resizeMode="contain" accessibilityLabel="CareerNexus" />
           <View style={styles.headerActions}>
             <TouchableOpacity style={[styles.profileHeaderButton, activeNav === 'Profile' && styles.profileHeaderButtonActive]} onPress={() => setActiveNav('Profile')} accessibilityRole="button" accessibilityLabel="Profile" accessibilityState={{ selected: activeNav === 'Profile' }}>
-              <Ionicons name="person-outline" size={19} color={activeNav === 'Profile' ? '#2563eb' : '#526779'} />
+              {isProfileImageUri(profile.photo) ? <Image source={{ uri: profile.photo }} style={styles.profileHeaderAvatar} resizeMode="cover" /> : <Text style={styles.profileHeaderInitials}>{profile.name?.split(/\s+/).map((part) => part[0]).join('').toUpperCase() || 'U'}</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.notificationsHeaderButton, activeNav === 'Notifications' && styles.notificationsHeaderButtonActive]} onPress={() => setActiveNav('Notifications')} accessibilityRole="button" accessibilityLabel="Notifications" accessibilityState={{ selected: activeNav === 'Notifications' }}>
+              <Ionicons name={activeNav === 'Notifications' ? 'notifications' : 'notifications-outline'} size={19} color={activeNav === 'Notifications' ? '#2563eb' : '#526779'} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.logoutIconButton} onPress={onLogout} accessibilityRole="button" accessibilityLabel="Log out">
               <Ionicons name="log-out-outline" size={20} color="#b91c1c" />
             </TouchableOpacity>
           </View>
         </View>
-        {(activeNav === 'Home' || activeNav === 'Apply') && <View style={styles.jobsSearchBox}>
+        {role === 'candidate' && (activeNav === 'Home' || activeNav === 'Apply') && <View style={styles.jobsSearchBox}>
           <Ionicons name="search-outline" size={18} color="#5b6d7b" />
           <TextInput value={jobSearchQuery} onChangeText={handleJobSearchChange} placeholder="Search jobs by keyword, company, city, or skill" placeholderTextColor="#74838e" style={styles.jobsSearchInput} returnKeyType="search" accessibilityLabel="Search jobs" />
           {jobSearchQuery ? <TouchableOpacity onPress={() => setJobSearchQuery('')} accessibilityLabel="Clear job search"><Ionicons name="close-circle" size={18} color="#74838e" /></TouchableOpacity> : null}
@@ -1058,7 +1504,11 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
 
         {activeNav === 'Profile' && <ResumeSection resume={profile.resume} onUpload={onUploadResume} onDownload={onDownloadResume} onDelete={onDeleteResume} />}
 
-        {activeNav === 'Home' && <View style={styles.statsRow}>
+        {activeNav === 'Home' && role === 'recruiter' && <MobileRecruiterHome email={email} profile={profile} />}
+
+        {activeNav === 'Applications' && role === 'recruiter' && <MobileRecruiterApplicationsView email={email} />}
+
+        {activeNav === 'Home' && role === 'candidate' && <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>15</Text>
             <Text style={styles.statLabel}>Search Appearance</Text>
@@ -1071,19 +1521,16 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
           </View>
         </View>}
 
-        {activeNav === 'Home' && <View style={styles.jobsSection}>
+        {activeNav === 'Home' && role === 'candidate' && <View style={styles.jobsSection}>
           <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Recommended for you</Text><TouchableOpacity onPress={() => setActiveNav('Apply')}><Text style={styles.linkText}>View all</Text></TouchableOpacity></View>
           <Text style={styles.jobsIntro}>All verified listings that match your profile, skills, and preferred location.</Text>
           {isLoadingJobs && <Text style={styles.libraryStatusText}>Loading matched job listings...</Text>}
-          {jobsError ? <Text style={styles.libraryStatusError}>{jobsError}</Text> : null}
-          {jobFeedStatus?.sourcesFailed.map((failure) => <Text key={failure.source} style={styles.libraryStatusError}>{failure.source}: {failure.message}</Text>)}
-          {!isLoadingJobs && !jobsError && homeJobs.length === 0 ? <Text style={styles.libraryStatusText}>{jobFeedStatus?.diagnostic || 'No verified job listings are currently available. View all for official employer career portals.'}</Text> : null}
-          {homeJobs.map((job) => <MobileJobCard key={job.id} job={job} onApply={applyToJob} />)}
-          {loadMoreError ? <Text style={styles.libraryStatusError}>{loadMoreError}</Text> : null}
+          {!isLoadingJobs && homeJobs.length === 0 ? <Text style={styles.libraryStatusText}>No verified job listings are currently available. View all for official employer career portals.</Text> : null}
+          {homeJobs.map((job) => <MobileJobCard key={job.id} job={job} onApply={applyToJob} onApplyRecruiterJob={applyToRecruiterJob} email={email} profile={profile} />)}
           {hasMoreRecommendations ? <TouchableOpacity style={styles.secondaryButton} onPress={loadMoreRecommendations} disabled={isLoadingMoreRecommendations}><Text style={styles.secondaryButtonText}>{isLoadingMoreRecommendations ? 'Loading more jobs...' : 'Load more jobs'}</Text></TouchableOpacity> : null}
         </View>}
 
-        {activeNav === 'Apply' && <View style={styles.jobsSection}>
+        {activeNav === 'Apply' && role === 'candidate' && <View style={styles.jobsSection}>
           <View style={styles.sectionTitleRow}>
             <Text style={styles.sectionTitle}>Jobs</Text>
             <Text style={styles.linkText}>View All</Text>
@@ -1099,11 +1546,8 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
 
           <Text style={styles.jobsIntro}>All jobs shown match your profile and preferred location; shortlist scores indicate fit.</Text>
           {isLoadingJobs && <Text style={styles.libraryStatusText}>Loading matched job listings...</Text>}
-          {jobsError ? <Text style={styles.libraryStatusError}>{jobsError}</Text> : null}
-          {jobFeedStatus?.sourcesFailed.map((failure) => <Text key={failure.source} style={styles.libraryStatusError}>{failure.source}: {failure.message}</Text>)}
-          {!isLoadingJobs && !jobsError && filteredJobGroups[activeTab].length === 0 ? <Text style={styles.libraryStatusText}>{jobGroups[activeTab].length ? `No jobs match “${jobSearchQuery}”.` : activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : jobFeedStatus?.diagnostic || 'No verified job listings are currently available.'}</Text> : null}
-          {!isLoadingJobs && !jobsError && filteredJobGroups[activeTab].map((job) => <MobileJobCard key={job.id} job={job} isApplied={activeTab === 'Applied Jobs'} onApply={applyToJob} />)}
-          {activeTab === 'Recommended Jobs' && loadMoreError ? <Text style={styles.libraryStatusError}>{loadMoreError}</Text> : null}
+          {!isLoadingJobs && filteredJobGroups[activeTab].length === 0 ? <Text style={styles.libraryStatusText}>{jobGroups[activeTab].length ? `No jobs match “${jobSearchQuery}”.` : activeTab === 'Applied Jobs' ? 'You have not applied to any jobs yet.' : 'No verified job listings are currently available.'}</Text> : null}
+          {!isLoadingJobs && filteredJobGroups[activeTab].map((job) => <MobileJobCard key={job.id} job={job} isApplied={activeTab === 'Applied Jobs'} onApply={applyToJob} onApplyRecruiterJob={applyToRecruiterJob} email={email} profile={profile} />)}
           {activeTab === 'Recommended Jobs' && hasMoreRecommendations ? <TouchableOpacity style={styles.secondaryButton} onPress={loadMoreRecommendations} disabled={isLoadingMoreRecommendations}><Text style={styles.secondaryButtonText}>{isLoadingMoreRecommendations ? 'Loading more jobs...' : 'Load more jobs'}</Text></TouchableOpacity> : null}
           <View style={styles.careerPortalSection}>
             <Text style={styles.portalSectionTitle}>Official career portals</Text>
@@ -1119,12 +1563,13 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
           <ProfileDetailsSection title="Professional Profile" fields={[
             ['Profile headline', profile.headline], ['Name', profile.name], ['Contact', profile.contact], ['Currently working as', profile.currentlyWorkingAs], ['Email ID', profile.email], ['Education', profile.education], ['Current location', profile.location], ['Languages', profile.languages],
           ]} onEdit={() => onEditProfileSection('professionalProfile')} />
+          {role === 'recruiter' ? <ProfileDetailsSection title="Professional Summary" fields={[["Summary", profile.professionalSummary]]} onEdit={() => onEditProfileSection('professionalSummary')} /> : null}
           <ProfileDetailsSection title="Professional Info" fields={[
             ['Current industry', profile.currentIndustry], ['Department', profile.department], ['Current role', profile.currentRole], ['Current job title', profile.currentJobTitle], ['Notice period', profile.noticePeriod], ['DOB', profile.dateOfBirth], ['Address', profile.address],
           ]} onEdit={() => onEditProfileSection('professionalInfo')} />
-          <ProfileDetailsSection title="Career Preferences" fields={[
+          {role === 'candidate' ? <ProfileDetailsSection title="Career Preferences" fields={[
             ['Preferred job role', profile.preferredJobRole], ['Preferred city', profile.preferredCity], ['Expected salary (INR LPA)', profile.expectedSalaryLpa], ['Total experience (years)', profile.totalExperienceYears], ['Job type', profile.jobType], ['Employment type', profile.employmentType], ['Preferred shift', profile.preferredShift],
-          ]} onEdit={() => onEditProfileSection('careerPreferences')} />
+          ]} onEdit={() => onEditProfileSection('careerPreferences')} /> : null}
           <ProfileDetailsSection title="Key Skills Set" onEdit={() => onEditProfileSection('keySkillsSet')}><View style={styles.skillTiles}>{(profile.skills || []).map((skill) => <View style={styles.skillTile} key={skill}><Text style={styles.skillTileText}>{skill}</Text></View>)}</View></ProfileDetailsSection>
           <ProfileDetailsSection title="Employment Details" onEdit={() => onEditProfileSection('employmentDetails')}>{(profile.employmentDetails || []).map((employment, index) => <View style={styles.profileRecord} key={index}><Text style={styles.profileRecordTitle}>{employment.companyName || `Company ${index + 1}`}</Text><Text style={styles.profileRecordText}>{employment.jobTitle || 'Job title not added'} · {employment.employmentType || 'Employment type not added'} · CTC: {employment.ctc || 'Not added'}</Text><Text style={styles.profileRecordText}>{employment.joiningDate || 'Joining date not added'}{employment.isCurrent ? ' · Current' : employment.relievingDate ? ` to ${employment.relievingDate}` : ''}</Text><Text style={styles.profileRecordText}>Skills: {(employment.skills || []).join(', ') || 'Not added'} · Notice period: {employment.noticePeriod || 'Not added'}</Text><Text style={styles.profileRecordText}>{employment.jobProfile}</Text></View>)}{!profile.employmentDetails?.length && <Text style={styles.profileRecordText}>No employment details added.</Text>}</ProfileDetailsSection>
           <ProfileDetailsSection title="Major Projects" onEdit={() => onEditProfileSection('majorProjects')}>{(profile.majorProjects || []).map((project, index) => <View style={styles.profileRecord} key={index}><Text style={styles.profileRecordTitle}>{project.projectTitle || `Project ${index + 1}`}</Text><Text style={styles.profileRecordText}>{[project.companyName, project.clientName, project.status].filter(Boolean).join(' · ')}</Text><Text style={styles.profileRecordText}>{project.workedFrom || 'Start date not added'}{project.workedTill ? ` to ${project.workedTill}` : ''}</Text><Text style={styles.profileRecordText}>{project.projectDetails}</Text></View>)}{!profile.majorProjects?.length && <Text style={styles.profileRecordText}>No projects added.</Text>}</ProfileDetailsSection>
@@ -1134,24 +1579,34 @@ function HomeDashboard({ profile, email, initialNav, onEditProfileSection, onLog
 
         {activeNav === 'Courses' && <CoursesView />}
 
-        {activeNav === 'Connect' && <ConnectView email={email} />}
+        {activeNav === 'Connect' && <ConnectView email={email} profile={profile} onApplyReferral={applyToReferral} onApplyRecruiterJob={applyToRecruiterJob} appliedJobIds={appliedIds} initialPerson={connectFocusPerson} onMessage={(person) => { setMessageRecipient(person); setActiveNav('Messages'); }} />}
+
+        {activeNav === 'Messages' && <MobileMessagesView email={email} role={role} onOpenPerson={(person) => { setConnectFocusPerson(person); setActiveNav('Connect'); }} initialPerson={messageRecipient} onConsumeInitialPerson={() => setMessageRecipient(null)} />}
+
+        {activeNav === 'Notifications' && <MobileNotificationsView email={email} onOpenApplications={() => setActiveNav('Applications')} onOpenMessages={() => setActiveNav('Messages')} />}
+
+        {activeNav === 'Messages' && <MobileMessagesView email={email} role={role} onOpenPerson={() => setActiveNav('Connect')} />}
+
+        {activeNav === 'Notifications' && <MobileNotificationsView email={email} onOpenApplications={() => setActiveNav('Applications')} onOpenMessages={() => setActiveNav('Messages')} />}
       </ScrollView>
       <View style={styles.bottomNav}>
-        {navigationItems.map((item) => {
-          const isActive = activeNav === item.label;
-          return (
-            <TouchableOpacity
-              key={item.label}
-              style={styles.bottomNavItem}
-              onPress={() => {
-                setActiveNav(item.label);
-              }}
-            >
-              <Ionicons name={isActive && item.activeIcon ? item.activeIcon : item.icon} size={23} color={isActive ? '#2563eb' : '#64748b'} />
-              <Text style={[styles.bottomNavLabel, isActive && styles.bottomNavLabelActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bottomNavItems}>
+          {dashboardNavigationItems.map((item) => {
+            const isActive = activeNav === item.label;
+            return (
+              <TouchableOpacity
+                key={item.label}
+                style={styles.bottomNavItem}
+                onPress={() => {
+                  setActiveNav(item.label);
+                }}
+              >
+                <Ionicons name={isActive && item.activeIcon ? item.activeIcon : item.icon} size={23} color={isActive ? '#2563eb' : '#64748b'} />
+                <Text style={[styles.bottomNavLabel, isActive && styles.bottomNavLabelActive]}>{item.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -1161,6 +1616,7 @@ export default function App() {
   const [screen, setScreen] = useState('login');
   const [profile, setProfile] = useState(defaultProfile);
   const [userEmail, setUserEmail] = useState('');
+  const [userRole, setUserRole] = useState('candidate');
   const [isReady, setIsReady] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [sectionToEdit, setSectionToEdit] = useState(null);
@@ -1177,11 +1633,13 @@ export default function App() {
   useEffect(() => {
     const loadAppState = async () => {
       try {
-        const [stored, storedEmail, storedProfile] = await Promise.all([
+        const [stored, storedEmail, storedProfile, storedRole] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEY),
           AsyncStorage.getItem(ACCOUNT_EMAIL_KEY),
           AsyncStorage.getItem(SESSION_PROFILE_KEY),
+          AsyncStorage.getItem(USER_ROLE_KEY),
         ]);
+        setUserRole(storedRole === 'recruiter' ? 'recruiter' : 'candidate');
         if (storedEmail && (stored === 'existing-user' || stored === 'new-user')) {
           setUserEmail(storedEmail);
           if (storedProfile) {
@@ -1262,6 +1720,8 @@ export default function App() {
       await Promise.all([
         AsyncStorage.removeItem(STORAGE_KEY),
         AsyncStorage.removeItem(ACCOUNT_EMAIL_KEY),
+        AsyncStorage.removeItem(USER_ROLE_KEY),
+        AsyncStorage.removeItem(ACCESS_TOKEN_KEY),
         AsyncStorage.removeItem(SESSION_PROFILE_KEY),
       ]);
     } catch (error) {
@@ -1356,24 +1816,21 @@ export default function App() {
     const profileToSave = { ...nextProfile };
     delete profileToSave.updatedAt;
     const nextProfileWithTimestamp = { ...nextProfile, updatedAt };
-    setProfile(nextProfileWithTimestamp);
-    await storeSessionProfile(nextProfileWithTimestamp);
-    if (!userEmail) return;
-
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/auth/profile`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: userEmail, profile: profileToSave }),
-      });
-      if (!response.ok) throw new Error('Unable to save profile');
-      const data = await response.json();
-      const savedProfile = { ...nextProfile, updatedAt: data.user?.updated_at || updatedAt };
-      setProfile(savedProfile);
-      await storeSessionProfile(savedProfile);
-    } catch (error) {
-      console.warn('Unable to persist profile', error);
+    if (!userEmail) {
+      setProfile(nextProfileWithTimestamp);
+      await storeSessionProfile(nextProfileWithTimestamp);
+      return;
     }
+    const response = await fetch(`${getApiBaseUrl()}/auth/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: userEmail, profile: profileToSave }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Unable to save profile.');
+    const savedProfile = { ...nextProfile, updatedAt: data.user?.updated_at || updatedAt };
+    setProfile(savedProfile);
+    await storeSessionProfile(savedProfile);
   };
 
   if (!isReady) {
@@ -1387,10 +1844,15 @@ export default function App() {
   if (screen === 'login') {
     return (
       <LoginScreen
-        onLogin={async ({ user, profile: savedProfile, isFirstTime }) => {
+        onLogin={async ({ user, profile: savedProfile, isFirstTime, accessToken }) => {
           const accountEmail = user?.email || '';
+          const accountRole = user?.role === 'recruiter' ? 'recruiter' : 'candidate';
           setUserEmail(accountEmail);
+          setUserRole(accountRole);
           if (accountEmail) await AsyncStorage.setItem(ACCOUNT_EMAIL_KEY, accountEmail);
+          await AsyncStorage.setItem(USER_ROLE_KEY, accountRole);
+          if (accessToken) await AsyncStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+          else await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
           const nextProfile = { ...defaultProfile, ...(savedProfile || {}), email: accountEmail, updatedAt: user?.updated_at || savedProfile?.updatedAt || null };
           await storeSessionProfile(nextProfile);
           if (savedProfile && Object.keys(savedProfile).length > 0) {
@@ -1418,6 +1880,7 @@ export default function App() {
       <ProfileForm
         profile={profile}
         email={userEmail}
+        role={userRole}
         isEditing={isEditingProfile}
         sectionToEdit={sectionToEdit}
         onSave={async (nextProfile) => {
@@ -1443,6 +1906,7 @@ export default function App() {
     <HomeDashboard
       profile={profile}
       email={userEmail || profile.email}
+      role={userRole}
       initialNav={landingNav}
       onUpdateProfilePicture={updateProfilePicture}
       onUploadResume={uploadResume}
@@ -1758,8 +2222,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#cbd6dd',
-    borderRadius: 8,
+    borderRadius: 18,
   },
+  profileHeaderAvatar: { width: 34, height: 34, borderRadius: 17 },
+  profileHeaderInitials: { color: '#245c8a', fontSize: 12, fontWeight: '800' },
+  notificationsHeaderButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 18, backgroundColor: '#fff' },
+  notificationsHeaderButtonActive: { backgroundColor: '#eaf2ff', borderColor: '#2563eb' },
   profileHeaderButtonActive: {
     backgroundColor: '#eaf2ff',
     borderColor: '#2563eb',
@@ -1896,7 +2364,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
     borderColor: '#ef4444',
-    borderRadius: 8,
+    borderRadius: 18,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1987,7 +2455,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   jobMatchBadge: { color: '#245c8a', backgroundColor: '#e7eff5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5, fontSize: 11, fontWeight: '600' },
-  jobActions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  jobActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 12 },
   jobViewButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 7, backgroundColor: '#f3f6f8' },
   jobViewButtonText: { color: '#245c8a', fontSize: 13, fontWeight: '600' },
   jobApplyButton: { minHeight: 38, minWidth: 80, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14, borderRadius: 7, backgroundColor: '#2563eb' },
@@ -2252,6 +2720,11 @@ const styles = StyleSheet.create({
   connectRoleButtonActive: { backgroundColor: '#2563eb' },
   connectRoleText: { color: '#526779', fontSize: 13, fontWeight: '700' },
   connectRoleTextActive: { color: '#fff' },
+  connectSectionTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 14, borderBottomWidth: 1, borderBottomColor: '#d7e0e6' },
+  connectSectionTab: { paddingHorizontal: 9, paddingVertical: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  connectSectionTabActive: { borderBottomColor: '#2563eb' },
+  connectSectionTabText: { color: '#526779', fontSize: 11, fontWeight: '700' },
+  connectSectionTabTextActive: { color: '#1d4ed8' },
   connectSearchLabel: { color: '#334155', fontSize: 12, fontWeight: '800', marginBottom: 7 },
   connectSearchInput: { minHeight: 44, color: '#172b3a', backgroundColor: '#fff', borderColor: '#cbd6dd', borderWidth: 1, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 9 },
   connectSuggestions: { marginTop: 5, borderColor: '#d7e0e6', borderWidth: 1, borderRadius: 8, overflow: 'hidden', backgroundColor: '#fff' },
@@ -2266,12 +2739,37 @@ const styles = StyleSheet.create({
   connectSecondaryAction: { minHeight: 34, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 6 },
   connectSecondaryActionText: { color: '#526779', fontSize: 12, fontWeight: '700' },
   connectActionGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  connectMessageAction: { width: 34, height: 34, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 6 },
+  connectMemberDetails: { gap: 7, marginVertical: 12, padding: 12, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 7, backgroundColor: '#f7f9fa' },
+  connectReferral: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#e4eaee' },
+  connectReferralDetails: { flex: 1, minWidth: 0, gap: 3 },
   connectLists: { gap: 20, marginTop: 24 },
   connectListSection: { gap: 7 },
   connectSectionTitle: { color: '#172b3a', fontSize: 15, fontWeight: '700', marginBottom: 2 },
   connectStatus: { color: '#526779', fontSize: 12, fontWeight: '700' },
   connectEmpty: { color: '#64748b', fontSize: 12, paddingVertical: 8 },
   connectError: { color: '#b91c1c', fontSize: 12, marginTop: 8 },
+  mobileJobReferralControl: { position: 'relative' },
+  mobileJobReferButton: { minHeight: 38, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4, paddingHorizontal: 10, borderWidth: 1, borderColor: '#cbd6dd', borderRadius: 7, backgroundColor: '#fff' },
+  mobileJobReferText: { color: '#245c8a', fontSize: 12, fontWeight: '700' },
+  mobileJobReferralOptions: { width: 190, maxHeight: 190, marginTop: 5, padding: 5, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 7, backgroundColor: '#fff' },
+  mobileJobReferralOption: { paddingVertical: 8, paddingHorizontal: 7 },
+  mobileJobReferralOptionText: { color: '#172b3a', fontSize: 12 },
+  mobileJobReferralMessage: { paddingHorizontal: 7, paddingVertical: 5, color: '#245c8a', fontSize: 11 },
+  recruiterOpeningsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 22, marginBottom: 8 },
+  recruiterOpeningTile: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8, padding: 12, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 7, backgroundColor: '#fff' },
+  recruiterOpeningDetails: { flex: 1, minWidth: 0, gap: 4 },
+  recruiterApplicationGroup: { marginTop: 8 },
+  recruiterApplicantTile: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 6, marginLeft: 12, padding: 10, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 6, backgroundColor: '#f8fafb' },
+  recruiterCandidateDetail: { gap: 8, marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#d7e0e6' },
+  messageRecipientSearch: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 10 },
+  messageItem: { gap: 7, marginTop: 9, padding: 12, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 7, backgroundColor: '#fff' },
+  messageJobTile: { gap: 4, padding: 10, borderLeftWidth: 3, borderLeftColor: '#2563eb', backgroundColor: '#f3f6f8' },
+  notificationItem: { gap: 4, marginTop: 8, padding: 12, borderWidth: 1, borderColor: '#d7e0e6', borderRadius: 6, backgroundColor: '#fff' },
+  cnApplicationModal: { flex: 1, backgroundColor: '#f5f7f8' },
+  cnApplicationContent: { gap: 12, padding: 18, paddingBottom: 36 },
+  recruiterJobDescription: { marginTop: 8, marginBottom: 3, padding: 10, borderRadius: 6, backgroundColor: '#f3f6f8' },
+  resumeChoice: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
   coursesEyebrow: {
     color: '#2563eb',
     fontSize: 12,
@@ -2419,14 +2917,17 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#dbe3ef',
     paddingTop: 8,
     paddingBottom: 6,
+  },
+  bottomNavItems: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    minWidth: '100%',
   },
   bottomNavItem: {
     alignItems: 'center',

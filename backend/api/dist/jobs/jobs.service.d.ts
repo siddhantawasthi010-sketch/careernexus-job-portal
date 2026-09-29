@@ -86,5 +86,110 @@ export declare class JobsService implements OnModuleInit {
     } | {
         appliedAt: any;
     }>;
+    getRecruiterOpenings(email: string): Promise<{
+        applicantsCount: number;
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }[]>;
+    createRecruiterOpening(email: string, input: Record<string, unknown>): Promise<{
+        applicantsCount: number;
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }>;
+    closeRecruiterOpening(email: string, openingId: string): Promise<{
+        id: string;
+        status: string;
+    }>;
+    applyToRecruiterOpening(email: string, openingId: string, details: Record<string, unknown>): Promise<{
+        appliedAt: any;
+        applicationDetails: any;
+        reviewStatus: any;
+    }>;
+    getReceivedApplications(email: string): Promise<{
+        applicants: {
+            matchScore: number;
+            candidate: {
+                id: unknown;
+                name: unknown;
+                email: unknown;
+                headline: string;
+                company: string;
+            };
+        }[];
+        applicantsCount: number;
+        id: string;
+        recruiterJobId: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        company: string;
+        location: string;
+        type: string;
+        jobType: any;
+        employmentType: string;
+        preferredShift: any;
+        description: string;
+        companyAbout: string;
+        salary: any;
+        url: string;
+        postedAt: string;
+        status: string;
+        matchScore: number;
+    }[]>;
+    getReceivedApplication(email: string, applicationId: string): Promise<{
+        id: any;
+        job: any;
+        appliedAt: any;
+        applicationDetails: any;
+        reviewStatus: any;
+        candidate: {
+            id: any;
+            name: any;
+            email: any;
+            profile: Record<string, unknown>;
+        };
+        resume: {
+            resume: {
+                storagePath?: string;
+            };
+            downloadUrl: string;
+        };
+    }>;
+    setApplicationStatus(email: string, applicationId: string, status: string): Promise<{
+        id: any;
+        reviewStatus: any;
+    }>;
     private scoreJob;
 }

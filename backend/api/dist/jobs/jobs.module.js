@@ -10,13 +10,16 @@ exports.JobsModule = void 0;
 const common_1 = require("@nestjs/common");
 const jobs_controller_1 = require("./jobs.controller");
 const jobs_service_1 = require("./jobs.service");
+const connect_token_guard_1 = require("../connect/connect-token.guard");
+const auth_module_1 = require("../auth/auth.module");
 let JobsModule = class JobsModule {
 };
 exports.JobsModule = JobsModule;
 exports.JobsModule = JobsModule = __decorate([
     (0, common_1.Module)({
+        imports: [auth_module_1.AuthModule],
         controllers: [jobs_controller_1.JobsController],
-        providers: [jobs_service_1.JobsService],
+        providers: [jobs_service_1.JobsService, connect_token_guard_1.ConnectTokenGuard],
     })
 ], JobsModule);
 //# sourceMappingURL=jobs.module.js.map
