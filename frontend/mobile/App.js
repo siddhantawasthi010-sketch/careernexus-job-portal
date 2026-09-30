@@ -112,6 +112,7 @@ function LoginScreen({ onLogin }) {
 
     setError('');
     setLoadingOtp(true);
+    let hasResponse = false;
 
     try {
       const response = await fetch(`${getApiBaseUrl()}/auth/send-otp`, {
@@ -119,11 +120,13 @@ function LoginScreen({ onLogin }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, role }),
       });
+      hasResponse = true;
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Unable to send OTP');
+        setError(data.message || 'Unable to send OTP');
+        return;
       }
 
       setKnownIsNewUser(Boolean(data.isNewUser));
@@ -132,12 +135,8 @@ function LoginScreen({ onLogin }) {
       setResendCooldown(30);
       setOtp('');
     } catch (error) {
-      if (!__DEV__) {
+      if (!__DEV__ || hasResponse) {
         setError(error.message || 'Unable to send OTP. Please try again later.');
-        return;
-      }
-      if (!__DEV__) {
-        setError(error.message || 'OTP verification failed. Please try again.');
         return;
       }
       const shouldUseFallback = knownIsNewUser === true;
@@ -168,6 +167,7 @@ function LoginScreen({ onLogin }) {
 
     setError('');
     setLoadingVerify(true);
+    let hasResponse = false;
 
     try {
       const response = await fetch(`${getApiBaseUrl()}/auth/verify-otp`, {
@@ -175,17 +175,23 @@ function LoginScreen({ onLogin }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp }),
       });
+      hasResponse = true;
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'OTP verification failed');
+        setError(data.message || 'OTP verification failed');
+        return;
       }
 
       const isFirstTimeUser = Boolean(data.isNewUser);
       await AsyncStorage.setItem(STORAGE_KEY, isFirstTimeUser ? 'new-user' : 'existing-user');
       onLogin({ user: data.user, profile: data.user.profile, isFirstTime: isFirstTimeUser, accessToken: data.accessToken });
     } catch (error) {
+      if (!__DEV__ || hasResponse) {
+        setError(error.message || 'OTP verification failed. Please try again.');
+        return;
+      }
       const fallbackIsFirstTime = knownIsNewUser === true;
       await AsyncStorage.setItem(STORAGE_KEY, fallbackIsFirstTime ? 'new-user' : 'existing-user');
       onLogin({ user: { email, role }, isFirstTime: fallbackIsFirstTime, accessToken: null });
@@ -699,7 +705,6 @@ function ConnectView({ email, profile, onApplyReferral, onApplyRecruiterJob, app
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
   const [processingId, setProcessingId] = useState('');
   const [error, setError] = useState('');
-
   useEffect(() => {
     if (!initialPerson) return;
     setSelectedPerson(initialPerson);
@@ -1242,7 +1247,7 @@ function MobileRecruiterApplicationsView({ email }) {
     await action('resume_downloaded');
   };
   return <View style={styles.jobsSection}>
-    <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Applications Received</Text><Text style={styles.linkText}>Ranked by match score</Text></View>
+    <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Applications Received</Text></View>
     {isLoading ? <Text style={styles.libraryStatusText}>Loading applications...</Text> : null}
     {!isLoading && !openings.length ? <Text style={styles.libraryStatusText}>Posted job applications will appear here.</Text> : null}
     {openings.map((opening) => <View key={opening.recruiterJobId} style={styles.recruiterApplicationGroup}><TouchableOpacity style={styles.recruiterOpeningTile} onPress={() => { setSelectedJob(opening); setSelectedApplication(null); }}><View style={styles.recruiterOpeningDetails}><Text style={styles.jobTitle}>{opening.title}</Text><Text style={styles.jobCompany}>{opening.company} · {opening.location}</Text><Text style={styles.profileRecordText}>{opening.applicants.length} applicants</Text></View><Ionicons name={selectedJob?.id === opening.id ? 'chevron-up' : 'chevron-down'} size={20} color="#526779" /></TouchableOpacity>{selectedJob?.id === opening.id ? opening.applicants.map((application) => <TouchableOpacity style={styles.recruiterApplicantTile} key={application.id} onPress={() => openApplication(application)}><View style={styles.recruiterOpeningDetails}><Text style={styles.connectPersonName}>{application.candidate.name}</Text><Text style={styles.connectPersonMeta}>{application.candidate.headline || application.candidate.email}</Text></View><Text style={styles.jobMatchBadge}>{application.matchScore}%</Text></TouchableOpacity>) : null}</View>)}
@@ -1584,8 +1589,6 @@ function HomeDashboard({ profile, email, role, initialNav, onEditProfileSection,
         {activeNav === 'Messages' && <MobileMessagesView email={email} role={role} onOpenPerson={(person) => { setConnectFocusPerson(person); setActiveNav('Connect'); }} initialPerson={messageRecipient} onConsumeInitialPerson={() => setMessageRecipient(null)} />}
 
         {activeNav === 'Notifications' && <MobileNotificationsView email={email} onOpenApplications={() => setActiveNav('Applications')} onOpenMessages={() => setActiveNav('Messages')} />}
-
-        {activeNav === 'Messages' && <MobileMessagesView email={email} role={role} onOpenPerson={() => setActiveNav('Connect')} />}
 
         {activeNav === 'Notifications' && <MobileNotificationsView email={email} onOpenApplications={() => setActiveNav('Applications')} onOpenMessages={() => setActiveNav('Messages')} />}
       </ScrollView>

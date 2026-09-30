@@ -791,6 +791,18 @@ export class DatabaseService {
     return data as StoredUser;
   }
 
+  async updateUserRole(email: string, role: UserRole): Promise<void> {
+    const { data, error } = await this.client
+      .from('users')
+      .update({ role })
+      .eq('email', email)
+      .select('id')
+      .maybeSingle();
+
+    if (error) throw new Error(`Unable to update user role: ${error.message}`);
+    if (!data) throw new Error('Unable to update user role: account could not be found.');
+  }
+
   async updateUserProfile(email: string, profile: Record<string, unknown>): Promise<StoredUser> {
     const name = typeof profile.name === 'string' && profile.name.trim() ? profile.name.trim() : undefined;
     const update = name ? { name, profile, updated_at: new Date().toISOString() } : { profile, updated_at: new Date().toISOString() };

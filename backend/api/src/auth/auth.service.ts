@@ -20,7 +20,9 @@ export class AuthService {
   private async buildUserForEmail(email: string, requestedRole: UserRole) {
     const existingUser = await this.databaseService.getUserByEmail(email);
     if (existingUser) {
-      return existingUser;
+      if (existingUser.role === requestedRole) return existingUser;
+      await this.databaseService.updateUserRole(email, requestedRole);
+      return { ...existingUser, role: requestedRole };
     }
 
     const firstName = email.split('@')[0].replace(/[._-]/g, ' ');
@@ -127,10 +129,19 @@ export class AuthService {
 
   private getAccessTokenSecret() {
     const secret = process.env.AUTH_TOKEN_SECRET;
-    if (!secret || secret.length < 32) {
-      throw new InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
+    if (secret) {
+      if (secret.length < 32) {
+        throw new InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
+      }
+      return secret;
     }
-    return secret;
+
+    const developmentServiceKey = process.env.NODE_ENV === 'production' ? '' : process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (developmentServiceKey && developmentServiceKey.length >= 32) {
+      return createHmac('sha256', developmentServiceKey).update('careernexus-auth-token-development-v1').digest('hex');
+    }
+
+    throw new InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
   }
 
   async updateProfile(email: string, profile: Record<string, unknown>) {

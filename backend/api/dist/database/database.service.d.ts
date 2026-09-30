@@ -275,6 +275,7 @@ export declare class DatabaseService {
         name: string;
         role: UserRole;
     }): Promise<StoredUser>;
+    updateUserRole(email: string, role: UserRole): Promise<void>;
     updateUserProfile(email: string, profile: Record<string, unknown>): Promise<StoredUser>;
     updateUserProfilePhoto(email: string, photo: string): Promise<StoredUser>;
     private ensureResumeBucket;

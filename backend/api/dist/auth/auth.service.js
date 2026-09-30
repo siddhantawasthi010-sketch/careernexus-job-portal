@@ -27,7 +27,10 @@ let AuthService = class AuthService {
     async buildUserForEmail(email, requestedRole) {
         const existingUser = await this.databaseService.getUserByEmail(email);
         if (existingUser) {
-            return existingUser;
+            if (existingUser.role === requestedRole)
+                return existingUser;
+            await this.databaseService.updateUserRole(email, requestedRole);
+            return { ...existingUser, role: requestedRole };
         }
         const firstName = email.split('@')[0].replace(/[._-]/g, ' ');
         const name = firstName ? firstName.charAt(0).toUpperCase() + firstName.slice(1) : 'New User';
@@ -122,10 +125,17 @@ let AuthService = class AuthService {
     }
     getAccessTokenSecret() {
         const secret = process.env.AUTH_TOKEN_SECRET;
-        if (!secret || secret.length < 32) {
-            throw new common_1.InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
+        if (secret) {
+            if (secret.length < 32) {
+                throw new common_1.InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
+            }
+            return secret;
         }
-        return secret;
+        const developmentServiceKey = process.env.NODE_ENV === 'production' ? '' : process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (developmentServiceKey && developmentServiceKey.length >= 32) {
+            return (0, crypto_1.createHmac)('sha256', developmentServiceKey).update('careernexus-auth-token-development-v1').digest('hex');
+        }
+        throw new common_1.InternalServerErrorException('AUTH_TOKEN_SECRET must contain at least 32 characters.');
     }
     async updateProfile(email, profile) {
         const normalizedEmail = email.trim().toLowerCase();
