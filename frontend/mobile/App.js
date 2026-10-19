@@ -505,7 +505,7 @@ function LibraryTopics({ topics }) {
   const availableLetters = new Set(topics.map((topic) => topic.name.charAt(0).toUpperCase()));
   const filteredTopics = topics.filter((topic) => {
     const matchesLetter = activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
-    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.example]
+    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.subtopics?.join(' '), topic.realWorldFlow, topic.example]
       .join(' ')
       .toLowerCase()
       .includes(normalizedQuery);
@@ -522,11 +522,11 @@ function LibraryTopics({ topics }) {
 
   return (
     <View style={styles.librarySection}>
-      <Text style={styles.libraryEyebrow}>TESTING LIBRARY</Text>
+      <Text style={styles.libraryEyebrow}>CAREER SKILLS LIBRARY</Text>
       <View style={styles.libraryHeader}>
         <View style={styles.libraryTitleBlock}>
-          <Text style={styles.libraryTitle}>Software testing topics</Text>
-          <Text style={styles.libraryIntro}>Build a stronger testing foundation, one concept at a time.</Text>
+          <Text style={styles.libraryTitle}>Skills and learning topics</Text>
+          <Text style={styles.libraryIntro}>Explore explanations, key concepts, practical examples, and end-to-end workflows.</Text>
         </View>
         <Text style={styles.topicCount}>{filteredTopics.length} topics</Text>
       </View>
@@ -563,9 +563,17 @@ function LibraryTopics({ topics }) {
             </TouchableOpacity>
             {isExpanded && <View style={styles.topicDetails}>
               <Text style={styles.topicBrief}>{topic.briefDescription}</Text>
-              <Text style={styles.topicFieldTitle}>Explanation in detail</Text>
+              <Text style={styles.topicFieldTitle}>Detailed explanation</Text>
               <Text style={styles.topicExplanation}>{topic.explanation}</Text>
-              <Text style={styles.topicFieldTitle}>Example</Text>
+              {!!topic.subtopics?.length && <>
+                <Text style={styles.topicFieldTitle}>Key subtopics</Text>
+                {topic.subtopics.map((subtopic) => <Text key={subtopic} style={styles.topicSubtopic}>• {subtopic}</Text>)}
+              </>}
+              {!!topic.realWorldFlow && <>
+                <Text style={styles.topicFieldTitle}>End-to-end real-world flow</Text>
+                <Text style={styles.topicExplanation}>{topic.realWorldFlow}</Text>
+              </>}
+              <Text style={styles.topicFieldTitle}>Worked coding example</Text>
               <View style={styles.topicExample}>
                 <Text style={styles.topicExampleText}>{topic.example}</Text>
               </View>
@@ -2660,6 +2668,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     marginBottom: 5,
+  },
+  topicSubtopic: {
+    color: '#334155',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 6,
   },
   topicExplanation: {
     color: '#334155',

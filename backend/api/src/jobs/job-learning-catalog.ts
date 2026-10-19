@@ -3,10 +3,295 @@ export interface JobLearningSkill {
   matchers: string[];
   briefDescription: string;
   explanation: string;
+  subtopics?: string[];
+  realWorldFlow?: string;
   example: string;
 }
 
+const softwareTestingTopics = [
+  'API Testing',
+  'Automation Testing',
+  'Black-box Testing',
+  'Boundary Value Analysis',
+  'Exploratory Testing',
+  'Integration Testing',
+  'Load Testing',
+  'Manual Testing',
+  'Performance Testing',
+  'Regression Testing',
+  'Smoke Testing',
+  'Test Case Design',
+  'Test-Driven Development',
+  'Unit Testing',
+  'User Acceptance Testing',
+  'Selenium',
+  'Cypress',
+  'Playwright',
+  'Jest',
+  'JUnit',
+  'Postman',
+  'Apache JMeter',
+];
+
+const softwareTestingSignals = [
+  'software tester',
+  'software testing',
+  'quality assurance',
+  'qa engineer',
+  'test engineer',
+  'automation tester',
+  'test automation',
+  'sdet',
+  'manual tester',
+  'cucumber',
+  'bdd',
+  'istqb',
+];
+
+const mentionsTerm = (text: string, term: string) => {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i').test(text);
+};
+
+export const getRelatedLearningSkills = (profileTerms: string[]) => {
+  const profileText = profileTerms.join(' ').toLowerCase();
+  const hasTestingRole = softwareTestingSignals.some((signal) => mentionsTerm(profileText, signal));
+  const hasTestingTool = ['selenium', 'cypress', 'playwright', 'cucumber', 'bdd', 'istqb', 'postman', 'jmeter']
+    .some((signal) => mentionsTerm(profileText, signal));
+  const relatedTopicNames = hasTestingRole || hasTestingTool ? softwareTestingTopics : [];
+
+  return jobLearningCatalog.filter((skill) => relatedTopicNames.includes(skill.name));
+};
+
 export const jobLearningCatalog: JobLearningSkill[] = [
+  {
+    name: 'API Testing',
+    matchers: ['api testing', 'api test', 'api tests'],
+    briefDescription: 'Verifies an API request from input validation through authorization, response contract, and persisted result.',
+    explanation: 'Treat an API as a contract between a client and server. Test valid and invalid inputs, authentication and ownership, status codes, response fields, persistence, duplicate requests, and dependency failures. Use isolated test records and assert observable behavior rather than private implementation details.',
+    subtopics: ['HTTP methods, routes, headers, and payloads', 'Authentication, authorization, and ownership', 'Validation, status codes, and response schemas', 'Persistence, idempotency, and error behavior', 'Fixtures, cleanup, and safe test credentials'],
+    realWorldFlow: 'Create an isolated user, authenticate, update a profile through the API, read it back to verify persistence, then send invalid and unauthorized requests and verify they do not change stored data.',
+    example: `import assert from 'node:assert/strict';
+
+const response = await fetch('http://localhost:5000/jobs?limit=1');
+assert.equal(response.status, 200);
+const jobs = await response.json();
+assert.ok(Array.isArray(jobs));`,
+  },
+  {
+    name: 'Automation Testing',
+    matchers: ['automation testing', 'test automation', 'automated testing'],
+    briefDescription: 'Uses repeatable test code to check important software behavior quickly and consistently.',
+    explanation: 'Choose a test level that matches the risk: unit tests for isolated rules, API/integration tests for service boundaries, and browser tests for user journeys. Reliable automation uses deterministic data, stable accessible selectors, explicit assertions, cleanup, and useful failure output. It complements exploratory and usability testing.',
+    subtopics: ['Unit, API, integration, and browser test levels', 'Fixtures and deterministic test data', 'Assertions and accessible selectors', 'Waiting, flakiness, parallel runs, and cleanup', 'CI reporting and risk-based coverage'],
+    realWorldFlow: 'Seed a disposable candidate, sign in, update a profile field, reload to prove persistence, and assert the saved value. Run the test in CI against an isolated environment and clean up its records.',
+    example: `import { test, expect } from '@playwright/test';
+
+test('profile changes persist after reload', async ({ page }) => {
+  await page.goto('/profile');
+  await page.getByLabel('Location').fill('Pune');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.getByText('Profile saved')).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Location')).toHaveValue('Pune');
+});`,
+  },
+  {
+    name: 'Black-box Testing',
+    matchers: ['black-box testing', 'black box testing'],
+    briefDescription: 'Checks a feature through its documented inputs and visible results without relying on its internal code.',
+    explanation: 'Start from a requirement and identify input classes, actions, expected results, state changes, and errors. Equivalence classes reduce redundant cases; boundary checks target limits; decision tables cover combinations; state-transition checks validate workflows. This approach works even when implementation details are unavailable.',
+    subtopics: ['Requirements and observable acceptance criteria', 'Input partitions and expected outputs', 'Boundary and decision-table techniques', 'State transitions and recovery', 'Evidence independent of implementation'],
+    realWorldFlow: 'For password reset, request a link for a test account, set a new password, and sign in. Repeat with unknown email, expired link, reused link, and invalid password; compare each visible result with the acceptance criteria.',
+    example: `const response = await fetch('http://localhost:5000/auth/password-reset', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ email: 'qa@example.test' }),
+});
+console.assert(response.status === 202);`,
+  },
+  {
+    name: 'Boundary Value Analysis',
+    matchers: ['boundary value analysis', 'boundary testing'],
+    briefDescription: 'Targets defects at the edges of accepted values, such as minimums, maximums, and values immediately outside them.',
+    explanation: 'For an allowed interval [min, max], check min-1, min, min+1, max-1, max, and max+1. Include empty, null, malformed, and wrong-type inputs where relevant. Boundaries also apply to string lengths, dates, uploads, and pagination. State the expected behavior for every test value.',
+    subtopics: ['Inclusive and exclusive limits', 'One-below, at, and one-above values', 'Empty and wrong-type inputs', 'String, date, upload, and pagination limits', 'Off-by-one and unit-conversion risks'],
+    realWorldFlow: 'If job search accepts page sizes from 1 through 50, request 0, 1, 2, 49, 50, and 51. Valid requests should return no more than the requested count; invalid requests should return a client error without triggering an unbounded query.',
+    example: `import assert from 'node:assert/strict';
+
+for (const limit of [1, 2, 49, 50]) {
+  const response = await fetch(\`http://localhost:5000/jobs?limit=\${limit}\`);
+  assert.equal(response.status, 200);
+  assert.ok((await response.json()).length <= limit);
+}
+for (const limit of [0, 51]) {
+  const response = await fetch(\`http://localhost:5000/jobs?limit=\${limit}\`);
+  assert.equal(response.status, 400);
+}`,
+  },
+  {
+    name: 'Exploratory Testing',
+    matchers: ['exploratory testing'],
+    briefDescription: 'Combines product learning, adaptive test design, and execution in a focused investigation.',
+    explanation: 'Use a charter and time box to focus investigation. Observe normal behavior, vary data and action order, probe interruptions and recovery, and record evidence. Explore risks such as permissions, repeated actions, slow networks, refresh/back navigation, and invalid state. Turn important discoveries into reproducible defects or regression checks.',
+    subtopics: ['Charters, scope, and time boxes', 'Risk heuristics and adaptive probing', 'Timing, state, permissions, and recovery', 'Session notes and reproducible evidence', 'Converting findings into regression tests'],
+    realWorldFlow: 'Explore checkout for 30 minutes with a duplicate-charge charter. Double-click Pay, refresh during processing, interrupt the network, return from the payment provider, and retry. Record transaction IDs, exact steps, expected/actual behavior, and evidence.',
+    example: `const charter = {
+  goal: 'Find duplicate-charge defects',
+  probes: ['double-click Pay', 'refresh while processing', 'disconnect network', 'retry after failure'],
+};
+for (const probe of charter.probes) console.log('Investigate:', probe);`,
+  },
+  {
+    name: 'Integration Testing',
+    matchers: ['integration testing', 'integration test', 'integration tests'],
+    briefDescription: 'Verifies that connected services and components exchange data correctly across real boundaries.',
+    explanation: 'Integration tests exercise real collaborating components such as an API and database, including serialization, constraints, transactions, middleware, and configuration. Use a temporary database or isolated environment, production-like migrations, controlled fixtures, and cleanup. Test failures and rollback as well as successful integration.',
+    subtopics: ['Component contracts and data mapping', 'Database schema, queries, and transactions', 'Middleware, serialization, and configuration', 'Queues and external service adapters', 'Isolation, cleanup, rollback, and failure paths'],
+    realWorldFlow: 'Submit an authenticated application through the actual API, then query a temporary database to verify the user/job relationship and initial status. Force a database constraint failure and confirm no partial application remains.',
+    example: `BEGIN;
+INSERT INTO applications (candidate_id, job_id, status)
+VALUES (42, 108, 'submitted');
+SELECT status FROM applications
+WHERE candidate_id = 42 AND job_id = 108;
+ROLLBACK;`,
+  },
+  {
+    name: 'Load Testing',
+    matchers: ['load testing', 'load test', 'load tests'],
+    briefDescription: 'Measures service behavior under a defined expected workload and concurrency level.',
+    explanation: 'Model realistic arrival rates, user journeys, ramp-up, duration, and data mix. Track latency percentiles, throughput, error rate, CPU, memory, database pools, and queue depth. Keep tests in a controlled environment with synthetic data. Load testing differs from stress and spike testing; define thresholds before running.',
+    subtopics: ['Workload, concurrency, and arrival rate', 'Ramp-up and steady-state duration', 'Latency percentiles, throughput, and errors', 'Application and database resource metrics', 'Safe environments and capacity decisions'],
+    realWorldFlow: 'Model 100 users per second searching jobs for 10 minutes, ramping up gradually. Compare p95 latency and error-rate thresholds to baseline, identify bottlenecks from metrics, make one change, and repeat the same workload.',
+    example: `import http from 'k6/http';
+import { check } from 'k6';
+
+export const options = {
+  stages: [{ duration: '2m', target: 100 }, { duration: '10m', target: 100 }],
+  thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<500'] },
+};
+export default function () {
+  check(http.get(\`\${__ENV.BASE_URL}/jobs?limit=20\`), { 'HTTP 200': r => r.status === 200 });
+}`,
+  },
+  {
+    name: 'Manual Testing',
+    matchers: ['manual testing', 'manual tester'],
+    briefDescription: 'Uses deliberate human interaction to evaluate behavior, usability, accessibility, and presentation.',
+    explanation: 'Manual testing is valuable for new features, exploratory work, visual quality, accessibility, and situations requiring human judgment. Define the goal, environment, preconditions, test data, steps, expected result, and evidence. Check error, empty, loading, keyboard, persistence, and recovery states; retest fixes and automate stable repetitive checks.',
+    subtopics: ['Scope, build, environment, and preconditions', 'Test data, actions, and expected results', 'Usability, accessibility, and visual review', 'Negative, loading, empty, and recovery states', 'Evidence, retesting, and automation candidates'],
+    realWorldFlow: 'Sign in, change a profile location, save, reload, and verify persistence. Repeat with keyboard-only navigation, empty input, simulated network failure, and a narrow viewport. Record browser/build and reproducible evidence for each defect.',
+    example: `const manualCheck = {
+  steps: ['Change location to Pune', 'Save profile', 'Reload the page'],
+  expected: 'Location remains Pune after reload',
+  evidence: 'Record browser, build, steps, and screenshot on failure',
+};
+console.log(manualCheck);`,
+  },
+  {
+    name: 'Performance Testing',
+    matchers: ['performance testing', 'performance test', 'performance tests'],
+    briefDescription: 'Measures response time, throughput, resource use, scalability, and stability under different workloads.',
+    explanation: 'Set measurable objectives such as p95/p99 latency, throughput, error rate, and resource ceilings. Run realistic load, stress, spike, or soak scenarios in a controlled environment. Monitor the full dependency path, use traces to identify bottlenecks, and compare identical workloads before and after changes. Averages alone can hide slow user experiences.',
+    subtopics: ['Latency percentiles and service objectives', 'Throughput, concurrency, and queueing', 'Load, stress, spike, and soak testing', 'CPU, memory, database, and network monitoring', 'Profiling and repeatable comparisons'],
+    realWorldFlow: 'Measure job search at expected and peak traffic, record p50/p95/p99 latency and resource use, trace a slow database filter, add an appropriate index, and rerun the same workload to prove the change improved latency without unacceptable resource cost.',
+    example: `import http from 'k6/http';
+export const options = {
+  vus: 40,
+  duration: '5m',
+  thresholds: { http_req_duration: ['p(95)<400', 'p(99)<800'] },
+};
+export default function () {
+  http.get(\`\${__ENV.BASE_URL}/jobs?limit=20\`);
+}`,
+  },
+  {
+    name: 'Regression Testing',
+    matchers: ['regression testing', 'regression test', 'regression tests'],
+    briefDescription: 'Rechecks important existing behavior after a change to catch unintended breakage.',
+    explanation: 'Select tests by business impact, code-change scope, defect history, and integration risk. A small smoke suite covers critical journeys; focused unit/API tests protect changed logic; broader regression suites run before release. Keep tests deterministic and maintainable, and assign ownership to flaky checks rather than silently ignoring them.',
+    subtopics: ['Change-impact and risk-based selection', 'Critical user journeys and business invariants', 'Focused checks near changed logic', 'Fixtures and deterministic assertions', 'CI release gates and flaky-test ownership'],
+    realWorldFlow: 'After changing application submission, run validation and persistence tests, then verify a candidate can search and apply and a recruiter receives the application. Block release on a high-risk regression and preserve the failing test evidence.',
+    example: `const checks = [
+  testRequiredProfileFields,
+  testApplicationSavedOnce,
+  testCandidateSeesAppliedStatus,
+  testRecruiterReceivesApplication,
+];
+for (const check of checks) await check();`,
+  },
+  {
+    name: 'Smoke Testing',
+    matchers: ['smoke testing', 'smoke test', 'smoke tests'],
+    briefDescription: 'Runs a fast health check after a build or deployment to decide whether deeper testing can proceed.',
+    explanation: 'Check that the application starts, core endpoints and dependencies respond, sign-in works in a safe test environment, core data loads, and one basic action succeeds. Smoke tests should be fast, stable, diagnostic, and non-destructive. A failure blocks deeper testing because the build may not be testable.',
+    subtopics: ['Build and deployment health', 'Core endpoints and dependencies', 'One essential authenticated journey', 'Fast, reversible, diagnostic checks', 'Release blocking and safe test accounts'],
+    realWorldFlow: 'After staging deployment, check API health and database connectivity, sign in with a disposable user, load the dashboard, and open a job. If any step fails, stop release promotion and investigate before running full regression.',
+    example: `const health = await fetch(\`\${process.env.BASE_URL}/health\`);
+if (!health.ok) throw new Error('Health check failed');
+const jobs = await fetch(\`\${process.env.BASE_URL}/jobs?limit=1\`);
+if (!jobs.ok || !Array.isArray(await jobs.json())) throw new Error('Job smoke check failed');`,
+  },
+  {
+    name: 'Test Case Design',
+    matchers: ['test case design', 'test case', 'test cases'],
+    briefDescription: 'Turns requirements and risks into reproducible tests with explicit inputs, actions, and expected results.',
+    explanation: 'A useful test is traceable to a requirement and has unambiguous pass/fail criteria. Capture actor, initial state, test data, actions, visible result, persisted side effect, and cleanup. Use equivalence classes, boundary analysis, decision tables, and state transitions to cover risk without unnecessary duplication. Include negative, permission, and recovery cases.',
+    subtopics: ['Requirement traceability and risk priority', 'Actors, preconditions, and test data', 'Actions and observable expected results', 'Equivalence classes and boundaries', 'Decision tables, state transitions, and cleanup'],
+    realWorldFlow: 'Translate “a candidate may apply once to an open job” into cases for eligible, missing resume, closed job, and duplicate submissions. Specify initial records, requests, expected messages/status, and the invariant that only one application exists.',
+    example: `const testCase = {
+  objective: 'Prevent duplicate applications',
+  precondition: 'Open job; candidate has no existing application',
+  actions: ['Submit application', 'Submit the same application again'],
+  expected: ['First creates one record', 'Second is reported as duplicate', 'Exactly one record remains'],
+};
+console.log(testCase);`,
+  },
+  {
+    name: 'Test-Driven Development',
+    matchers: ['test-driven development', 'tdd'],
+    briefDescription: 'Builds behavior incrementally through a failing test, minimal implementation, and refactoring.',
+    explanation: 'Red: write a focused test that describes desired behavior and fails for the expected reason. Green: make the smallest correct implementation. Refactor: improve design while keeping the test green. Assert observable behavior rather than private implementation. TDD benefits from fast feedback but does not replace integration, security, or acceptance testing.',
+    subtopics: ['Red: specify behavior with a failing test', 'Green: minimal passing implementation', 'Refactor while keeping tests green', 'Normal, boundary, and error cases', 'Fast feedback and complementary integration tests'],
+    realWorldFlow: 'For a salary formatter, first test conversion from rupees to lakhs, implement only that behavior, add zero and invalid-value cases, refactor, and run profile UI checks to verify the formatted value appears in the real workflow.',
+    example: `import assert from 'node:assert/strict';
+function formatLpa(rupees) {
+  if (!Number.isFinite(rupees) || rupees < 0) throw new RangeError();
+  return \`\${(rupees / 100000).toFixed(1)} LPA\`;
+}
+assert.equal(formatLpa(1800000), '18.0 LPA');
+assert.throws(() => formatLpa(-1), RangeError);`,
+  },
+  {
+    name: 'Unit Testing',
+    matchers: ['unit testing', 'unit test', 'unit tests'],
+    briefDescription: 'Checks one small function, class, or component in isolation for fast, precise feedback.',
+    explanation: 'Control inputs and external dependencies, call one unit, and assert its observable result. Cover representative valid values, edge cases, and errors. Keep tests deterministic and fast; use test doubles at external boundaries such as time, network, or storage, not to recreate the implementation. A failure should point to one behavior.',
+    subtopics: ['Unit boundary and behavior contract', 'Arrange, act, and assert', 'Representative, boundary, and error inputs', 'Dependency doubles and isolation', 'Determinism and clear failure messages'],
+    realWorldFlow: 'Test a profile-completion calculator with empty, partial, and complete profiles. Then run a component test to verify the resulting percentage is displayed correctly in the profile UI.',
+    example: `import assert from 'node:assert/strict';
+function completion(profile) {
+  const fields = ['name', 'headline', 'location', 'skills'];
+  const filled = fields.filter((key) => Boolean(profile[key])).length;
+  return Math.round(filled / fields.length * 100);
+}
+assert.equal(completion({}), 0);
+assert.equal(completion({ name: 'Asha', skills: ['SQL'] }), 50);`,
+  },
+  {
+    name: 'User Acceptance Testing',
+    matchers: ['user acceptance testing', 'uat'],
+    briefDescription: 'Confirms with representative users that a complete feature meets business goals and agreed acceptance criteria.',
+    explanation: 'UAT validates business fitness, not just technical correctness. Define measurable acceptance criteria before implementation, use realistic roles and data in a production-like environment, and execute complete journeys. Record evidence, blockers, and decisions; authorized stakeholders approve or block release. UAT does not replace security, performance, or developer testing.',
+    subtopics: ['Business goals and acceptance criteria', 'Representative users, roles, and realistic data', 'Complete user journeys and downstream effects', 'Evidence, defect triage, and approval ownership', 'Relationship to QA, security, and performance testing'],
+    realWorldFlow: 'A candidate searches and applies to a job, sees confirmation, and finds it under Applied Jobs. A recruiter sees the correct candidate and resume. Stakeholders verify every criterion with evidence and record release approval or blockers.',
+    example: `const criteria = [
+  ['candidate', 'apply to an open job', 'one application and confirmation'],
+  ['candidate', 'open Applied Jobs', 'job appears with submitted status'],
+  ['recruiter', 'open the application', 'candidate details and resume are visible'],
+];
+for (const [role, action, expected] of criteria) console.log({ role, action, expected });`,
+  },
   { name: 'JavaScript', matchers: ['javascript', 'ecmascript'], briefDescription: 'A programming language used for interactive web applications and server-side services.', explanation: 'JavaScript runs in web browsers and on server runtimes such as Node.js. Job requirements commonly include asynchronous programming, modules, data handling, and working with browser or service APIs.', example: 'Use async/await to fetch profile data and render the response after it resolves.' },
   { name: 'TypeScript', matchers: ['typescript'], briefDescription: 'JavaScript with a static type system for safer application development.', explanation: 'TypeScript adds compile-time types, interfaces, and generics to JavaScript. Teams use it to make contracts explicit and catch many data-shape mistakes before code runs.', example: 'Define a Job interface so title, company, and application URL are checked by the compiler.' },
   { name: 'Python', matchers: ['python'], briefDescription: 'A general-purpose language used in backend services, automation, data, and AI.', explanation: 'Python is valued for its readable syntax and broad ecosystem. Common work includes APIs, scripts, data processing, testing, and machine-learning applications.', example: 'Write a Python service that validates incoming JSON and stores normalized records.' },

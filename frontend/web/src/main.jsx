@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { ArrowUpRight, Bell, Briefcase, ChevronDown, ChevronUp, ClipboardList, Download, FileText, GraduationCap, Home, Library, LogOut, Mail, MessageSquare, Pencil, Plus, Search, Send, Trash2, Upload, User, UsersRound, X } from 'lucide-react';
+import { ArrowUpRight, Bell, Briefcase, ChevronDown, ChevronUp, ClipboardList, Download, FileText, LogOut, Mail, MessageSquare, Pencil, Plus, Search, Send, Trash2, Upload, User, UsersRound, X } from 'lucide-react';
 import { locationSuggestions } from '../../shared/locations';
 import { calculateProfileCompletion, formatProfileUpdatedAt, languageSuggestions, noticePeriodOptions } from '../../shared/profile';
 import './styles.css';
@@ -39,17 +39,34 @@ const defaultProfile = {
 const tabs = ['Applied Jobs', 'Recommended Jobs'];
 const JOB_RECOMMENDATION_PAGE_SIZE = 12;
 const navigationItems = [
-  { label: 'Home', icon: Home },
   { label: 'Apply', icon: Send },
   { label: 'Connect', icon: UsersRound },
-  { label: 'Library', icon: Library },
-  { label: 'Courses', icon: GraduationCap },
 ];
 const STORAGE_KEY = 'jobportal_user_profile_status';
 const ACCOUNT_EMAIL_KEY = 'jobportal_account_email';
 const USER_ROLE_KEY = 'jobportal_user_role';
 const ACCESS_TOKEN_KEY = 'jobportal_access_token';
+const SEEN_MESSAGES_KEY = 'jobportal_seen_messages';
+const SEEN_NOTIFICATIONS_KEY = 'jobportal_seen_notifications';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
+
+const readSeenIds = (storageKey, email) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(`${storageKey}:${email}`) || '[]');
+    return new Set(Array.isArray(value) ? value.map(String) : []);
+  } catch (error) {
+    console.warn(`Unable to read ${storageKey} from local storage:`, error);
+    return new Set();
+  }
+};
+
+const writeSeenIds = (storageKey, email, ids) => {
+  try {
+    localStorage.setItem(`${storageKey}:${email}`, JSON.stringify([...ids].slice(-500)));
+  } catch (error) {
+    console.warn(`Unable to save ${storageKey} to local storage:`, error);
+  }
+};
 const getConnectAuthHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` });
 
 const getSalaryInputValue = (value = '') => value.replace(/^(INR|₹)\s*/i, '');
@@ -728,7 +745,7 @@ function LibraryTopics({ topics }) {
   const availableLetters = new Set(topics.map((topic) => topic.name.charAt(0).toUpperCase()));
   const filteredTopics = topics.filter((topic) => {
     const matchesLetter = activeLetter === 'All' || topic.name.toUpperCase().startsWith(activeLetter);
-    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.example]
+    const matchesSearch = [topic.name, topic.briefDescription, topic.explanation, topic.subtopics?.join(' '), topic.realWorldFlow, topic.example]
       .join(' ')
       .toLowerCase()
       .includes(normalizedQuery);
@@ -747,9 +764,9 @@ function LibraryTopics({ topics }) {
     <section className="library-section panel">
       <div className="library-header">
         <div>
-          <p className="eyebrow library-eyebrow">TESTING LIBRARY</p>
-          <h2>Software testing topics</h2>
-          <p className="library-intro">Build a stronger testing foundation, one concept at a time.</p>
+          <p className="eyebrow library-eyebrow">CAREER SKILLS LIBRARY</p>
+          <h2>Skills and learning topics</h2>
+          <p className="library-intro">Explore clear explanations, key concepts, practical examples, and end-to-end workflows.</p>
         </div>
         <span className="topic-count">{filteredTopics.length} topics</span>
       </div>
@@ -797,11 +814,19 @@ function LibraryTopics({ topics }) {
               {isExpanded && <div id={`topic-details-${topic.name.replaceAll(' ', '-')}`} className="topic-details">
                 <p className="topic-brief">{topic.briefDescription}</p>
                 <div className="topic-field">
-                  <h4>Explanation in detail</h4>
+                  <h4>Detailed explanation</h4>
                   <p>{topic.explanation}</p>
                 </div>
+                {!!topic.subtopics?.length && <div className="topic-field">
+                  <h4>Key subtopics</h4>
+                  <ul className="topic-subtopics">{topic.subtopics.map((subtopic) => <li key={subtopic}>{subtopic}</li>)}</ul>
+                </div>}
+                {topic.realWorldFlow && <div className="topic-field">
+                  <h4>End-to-end real-world flow</h4>
+                  <p>{topic.realWorldFlow}</p>
+                </div>}
                 <div className="topic-field topic-example">
-                  <h4>Example</h4>
+                  <h4>Worked coding example</h4>
                   <pre><code>{topic.example}</code></pre>
                 </div>
               </div>}
@@ -933,6 +958,108 @@ function CoursesView() {
   if (error) return <section className="courses-section panel"><p className="library-status error">{error}</p></section>;
 
   return <CoursesList courses={courseList} />;
+}
+
+function profileLearningTerms(profile) {
+  const profileFields = [
+    profile.skills,
+    profile.preferredJobRole,
+    profile.currentRole,
+    profile.currentJobTitle,
+    profile.currentIndustry,
+    profile.department,
+    profile.headline,
+    profile.currentlyWorkingAs,
+  ];
+  return [...new Set(profileFields
+    .flatMap((value) => Array.isArray(value) ? value : [value])
+    .filter((value) => typeof value === 'string' && value.trim())
+    .flatMap((value) => value.toLowerCase().match(/[a-z0-9+#.]+/g) || []))];
+}
+
+function rankLearningItems(items, profile, getSearchableText, getLabel) {
+  const terms = profileLearningTerms(profile);
+  return [...items]
+    .map((item) => {
+      const searchableWords = new Set((getSearchableText(item).toLowerCase().match(/[a-z0-9+#.]+/g) || []));
+      const score = terms.reduce((total, term) => total + (searchableWords.has(term) ? 1 : 0), 0);
+      return { item, score };
+    })
+    .sort((first, second) => second.score - first.score || getLabel(first.item).localeCompare(getLabel(second.item)))
+    .map(({ item }) => item);
+}
+
+function HomeLearningPanel({ profile, onOpenLibrary, onOpenCourses }) {
+  const [topics, setTopics] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [topicsError, setTopicsError] = useState('');
+  const [coursesError, setCoursesError] = useState('');
+  const [isLoadingTopics, setIsLoadingTopics] = useState(true);
+  const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+
+  useEffect(() => {
+    let isActive = true;
+    fetch(`${API_BASE_URL}/library/topics`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load library topics.');
+        if (isActive) setTopics(Array.isArray(data) ? data : []);
+      })
+      .catch((error) => { if (isActive) setTopicsError(error.message || 'Unable to load library topics.'); })
+      .finally(() => { if (isActive) setIsLoadingTopics(false); });
+
+    fetch(`${API_BASE_URL}/courses`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load courses.');
+        if (isActive) setCourses(Array.isArray(data) ? data : []);
+      })
+      .catch((error) => { if (isActive) setCoursesError(error.message || 'Unable to load courses.'); })
+      .finally(() => { if (isActive) setIsLoadingCourses(false); });
+
+    return () => { isActive = false; };
+  }, []);
+
+  const recommendedTopics = rankLearningItems(topics, profile, (topic) => (
+    [topic.name, topic.briefDescription, topic.explanation, topic.subtopics?.join(' ')].join(' ')
+  ), (topic) => topic.name).slice(0, 5);
+  const recommendedCourses = rankLearningItems(courses, profile, (course) => (
+    [course.title, course.topic, course.provider, course.level].join(' ')
+  ), (course) => course.title).slice(0, 3);
+
+  return <aside className="home-learning-rail" aria-label="Learning recommendations">
+    <section className="home-learning-section panel">
+      <div className="home-learning-heading">
+        <div><p className="eyebrow">LIBRARY</p><h3>Recommended topics</h3></div>
+        <button type="button" className="link-button" onClick={onOpenLibrary}>View all</button>
+      </div>
+      {isLoadingTopics && <p className="home-learning-status">Loading topics...</p>}
+      {!isLoadingTopics && topicsError && <p className="home-learning-status error" role="alert">{topicsError}</p>}
+      {!isLoadingTopics && !topicsError && !recommendedTopics.length && <p className="home-learning-status">No library topics are available yet.</p>}
+      {!isLoadingTopics && !topicsError && recommendedTopics.map((topic) => (
+        <button type="button" className="home-learning-item" key={topic.id || topic.name} onClick={onOpenLibrary}>
+          <strong>{topic.name}</strong>
+          <span>{topic.briefDescription}</span>
+        </button>
+      ))}
+    </section>
+    <section className="home-learning-section panel">
+      <div className="home-learning-heading">
+        <div><p className="eyebrow">COURSES</p><h3>Recommended courses</h3></div>
+        <button type="button" className="link-button" onClick={onOpenCourses}>View all</button>
+      </div>
+      {isLoadingCourses && <p className="home-learning-status">Loading courses...</p>}
+      {!isLoadingCourses && coursesError && <p className="home-learning-status error" role="alert">{coursesError}</p>}
+      {!isLoadingCourses && !coursesError && !recommendedCourses.length && <p className="home-learning-status">No courses are available yet.</p>}
+      {!isLoadingCourses && !coursesError && recommendedCourses.map((course) => (
+        <article className="home-learning-item" key={course.id || course.title}>
+          <strong>{course.title}</strong>
+          <span>{[course.topic, course.provider].filter(Boolean).join(' · ')}</span>
+          <a href={course.url} target="_blank" rel="noreferrer">View course</a>
+        </article>
+      ))}
+    </section>
+  </aside>;
 }
 
 function ConnectView({ email, onApplyReferral, appliedJobIds, initialPerson, onMessage }) {
@@ -1372,6 +1499,39 @@ function NotificationsView({ email, onOpenApplications, onOpenMessages }) {
   return <section className="notifications-view"><div className="jobs-header"><div><p className="eyebrow">ACTIVITY</p><h2>Notifications</h2></div></div>{isLoading && <p className="library-status">Loading notifications…</p>}{!isLoading && !notifications.length && <p className="library-status">No notifications yet.</p>}<div className="notification-list">{notifications.map((notification) => <button type="button" key={notification.id} className="notification-item" onClick={notification.type === 'application' ? onOpenApplications : onOpenMessages}><span className="notification-icon">{notification.type === 'application' ? <Briefcase size={18} /> : <Mail size={18} />}</span><span><strong>{notification.title}</strong><small>{notification.description}</small></span><time>{new Date(notification.createdAt).toLocaleDateString()}</time></button>)}</div></section>;
 }
 
+function UserProfileSidebar({ profile, email, onOpenProfile }) {
+  const name = profile.name?.trim() || 'Complete your profile';
+  const initials = profile.name?.trim().split(/\s+/).map((part) => part[0]).join('').toUpperCase() || 'U';
+  const photo = typeof profile.photo === 'string' && (profile.photo.startsWith('data:') || profile.photo.includes('://'))
+    ? profile.photo
+    : null;
+  const location = profile.location || profile.preferredCity;
+  const skills = Array.isArray(profile.skills) ? profile.skills.filter(Boolean).slice(0, 4) : [];
+
+  return <aside className="user-profile-sidebar panel" aria-label="Your profile">
+    <div className="user-profile-avatar" aria-hidden="true">
+      {photo ? <img src={photo} alt="" /> : <span>{initials}</span>}
+    </div>
+    <h2>{name}</h2>
+    <p className="user-profile-headline">{profile.headline || profile.currentlyWorkingAs || 'Add a profile headline'}</p>
+    <dl className="user-profile-details">
+      <div><dt>Email</dt><dd>{profile.email || email || 'Add your email'}</dd></div>
+      <div><dt>Location</dt><dd>{location || 'Add your location'}</dd></div>
+    </dl>
+    <div className="user-profile-completion">
+      <div><span>Profile completion</span><strong>{calculateProfileCompletion(profile)}%</strong></div>
+      <div className="user-profile-progress" role="progressbar" aria-label="Profile completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow={calculateProfileCompletion(profile)}>
+        <span style={{ width: `${calculateProfileCompletion(profile)}%` }} />
+      </div>
+    </div>
+    {skills.length > 0 && <div className="user-profile-skills">
+      <h3>Skills</h3>
+      <div>{skills.map((skill) => <span className="profile-tile" key={skill}>{skill}</span>)}</div>
+    </div>}
+    <button type="button" className="user-profile-action" onClick={onOpenProfile}>View profile</button>
+  </aside>;
+}
+
 function LandingDashboard({ profile, email, role, initialNav, onEditProfileSection, onLogout, onUpdateProfilePicture, onUploadResume, onDownloadResume, onDeleteResume }) {
   const [activeTab, setActiveTab] = useState('Applied Jobs');
   const [activeNav, setActiveNav] = useState(() => new URLSearchParams(window.location.search).has('cn-apply') && role === 'candidate' ? 'CN Apply' : initialNav);
@@ -1384,9 +1544,11 @@ function LandingDashboard({ profile, email, role, initialNav, onEditProfileSecti
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [hasMoreRecommendations, setHasMoreRecommendations] = useState(false);
   const [isLoadingMoreRecommendations, setIsLoadingMoreRecommendations] = useState(false);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [newNotificationCount, setNewNotificationCount] = useState(0);
   const dashboardNavigationItems = role === 'recruiter'
-    ? [{ label: 'Home', icon: Home }, { label: 'Applications Received', icon: ClipboardList }, { label: 'Connect', icon: UsersRound }, { label: 'Notifications', icon: Bell }, { label: 'Messages', icon: MessageSquare }]
-    : [...navigationItems.slice(0, 3), { label: 'Notifications', icon: Bell }, { label: 'Messages', icon: MessageSquare }, ...navigationItems.slice(3)];
+    ? [{ label: 'Applications Received', icon: ClipboardList }, { label: 'Connect', icon: UsersRound }]
+    : navigationItems;
 
   const handleJobSearchChange = (value) => {
     setJobSearchQuery(value);
@@ -1407,6 +1569,55 @@ function LandingDashboard({ profile, email, role, initialNav, onEditProfileSecti
     reader.readAsDataURL(file);
     event.target.value = '';
   };
+
+  useEffect(() => {
+    if (!email) return undefined;
+    let isActive = true;
+    const refreshBadgeCounts = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/connect/messages?email=${encodeURIComponent(email)}`, { headers: getConnectAuthHeaders() });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load message counts.');
+        if (!isActive) return;
+        const receivedMessages = (Array.isArray(data) ? data : []).filter((message) => message.isReceived);
+        const seenMessages = readSeenIds(SEEN_MESSAGES_KEY, email);
+        if (activeNav === 'Messages') {
+          receivedMessages.forEach((message) => seenMessages.add(String(message.id)));
+          writeSeenIds(SEEN_MESSAGES_KEY, email, seenMessages);
+          setUnreadMessageCount(0);
+        } else {
+          setUnreadMessageCount(receivedMessages.filter((message) => !seenMessages.has(String(message.id))).length);
+        }
+      } catch (error) {
+        if (isActive) console.warn('Unable to refresh unread message count:', error);
+      }
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/connect/notifications?email=${encodeURIComponent(email)}`, { headers: getConnectAuthHeaders() });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load notification counts.');
+        if (!isActive) return;
+        const notifications = Array.isArray(data) ? data : [];
+        const seenNotifications = readSeenIds(SEEN_NOTIFICATIONS_KEY, email);
+        if (activeNav === 'Notifications') {
+          notifications.forEach((notification) => seenNotifications.add(String(notification.id)));
+          writeSeenIds(SEEN_NOTIFICATIONS_KEY, email, seenNotifications);
+          setNewNotificationCount(0);
+        } else {
+          setNewNotificationCount(notifications.filter((notification) => !seenNotifications.has(String(notification.id))).length);
+        }
+      } catch (error) {
+        if (isActive) console.warn('Unable to refresh new notification count:', error);
+      }
+    };
+
+    refreshBadgeCounts();
+    const intervalId = window.setInterval(refreshBadgeCounts, 30000);
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+    };
+  }, [activeNav, email]);
 
   useEffect(() => {
     if (!email) return undefined;
@@ -1507,26 +1718,42 @@ function LandingDashboard({ profile, email, role, initialNav, onEditProfileSecti
   return (
     <div className={activeNav === 'Profile' ? 'landing-page profile-page' : 'landing-page'}>
       <header className="topbar landing-topbar">
-        <img className="dashboard-logo" src="/images/companylogo-after-login.png" alt="CareerNexus" />
-        <nav className="top-nav" aria-label="Primary navigation">
-          {dashboardNavigationItems.map(({ label, icon: Icon }) => {
-            const isActive = activeNav === label;
-            return (
-              <button
-                key={label}
-                type="button"
-                className={isActive ? 'top-nav-item active' : 'top-nav-item'}
-                onClick={() => {
-                  setActiveNav(label);
-                }}
-              >
-                <Icon size={19} strokeWidth={isActive ? 2.6 : 2} />
-                <span>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <button type="button" className="logo-home-button" aria-label="CareerNexus home" title="Home" onClick={() => { setActiveNav('Home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+          <img className="dashboard-logo" src="/images/companylogo-after-login.png" alt="CareerNexus" />
+        </button>
+        <div className="topbar-center">
+          <nav className="top-nav" aria-label="Primary navigation">
+            {dashboardNavigationItems.map(({ label, icon: Icon }) => {
+              const isActive = activeNav === label;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  className={isActive ? 'top-nav-item active' : 'top-nav-item'}
+                  onClick={() => {
+                    setActiveNav(label);
+                  }}
+                >
+                  <Icon size={19} strokeWidth={isActive ? 2.6 : 2} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </nav>
+          {role === 'candidate' && <div className="jobs-search-box dashboard-jobs-search" role="search">
+            <Search size={18} aria-hidden="true" />
+            <input type="search" aria-label="Search jobs" placeholder="Search jobs by keyword, company, city, or skill" value={jobSearchQuery} onChange={(event) => handleJobSearchChange(event.target.value)} />
+          </div>}
+        </div>
         <div className="header-right">
+          <button type="button" className={activeNav === 'Notifications' ? 'header-icon-button active' : 'header-icon-button'} onClick={() => setActiveNav('Notifications')} aria-label={`Notifications${newNotificationCount ? `, ${newNotificationCount} new` : ''}`} title="Notifications" aria-pressed={activeNav === 'Notifications'}>
+            <Bell size={19} aria-hidden="true" />
+            {newNotificationCount > 0 && <span className="header-icon-badge" aria-hidden="true">{newNotificationCount > 99 ? '99+' : newNotificationCount}</span>}
+          </button>
+          <button type="button" className={activeNav === 'Messages' ? 'header-icon-button active' : 'header-icon-button'} onClick={() => setActiveNav('Messages')} aria-label={`Messages${unreadMessageCount ? `, ${unreadMessageCount} unread` : ''}`} title="Messages" aria-pressed={activeNav === 'Messages'}>
+            <MessageSquare size={19} aria-hidden="true" />
+            {unreadMessageCount > 0 && <span className="header-icon-badge" aria-hidden="true">{unreadMessageCount > 99 ? '99+' : unreadMessageCount}</span>}
+          </button>
           <button type="button" className={activeNav === 'Profile' ? 'profile-icon-button active' : 'profile-icon-button'} onClick={() => setActiveNav('Profile')} aria-label="Profile" title="Profile" aria-pressed={activeNav === 'Profile'}>
             {profile.photo?.startsWith('data:') || profile.photo?.includes('://') ? <img className="profile-button-avatar" src={profile.photo} alt="" /> : <span className="profile-button-initials">{profile.name?.split(/\s+/).map((part) => part[0]).join('').toUpperCase() || 'U'}</span>}
           </button>
@@ -1534,12 +1761,9 @@ function LandingDashboard({ profile, email, role, initialNav, onEditProfileSecti
         </div>
       </header>
 
-      <main className="dashboard-shell">
-        {role === 'candidate' && <div className="jobs-search-box dashboard-jobs-search" role="search">
-          <Search size={18} aria-hidden="true" />
-          <input type="search" aria-label="Search jobs" placeholder="Search jobs by keyword, company, city, or skill" value={jobSearchQuery} onChange={(event) => handleJobSearchChange(event.target.value)} />
-        </div>}
-
+      <main className="dashboard-shell workspace-dashboard">
+        <UserProfileSidebar profile={profile} email={email} onOpenProfile={() => setActiveNav('Profile')} />
+        <div className="workspace-main-content">
         {activeNav === 'Profile' && <section className="profile-section panel">
           <div className="profile-summary">
             <div className="profile-identity">
@@ -1565,26 +1789,28 @@ function LandingDashboard({ profile, email, role, initialNav, onEditProfileSecti
 
         {activeNav === 'Applications Received' && role === 'recruiter' && <RecruiterApplicationsView email={email} />}
 
-        {activeNav === 'Home' && role === 'candidate' && <section className="insights-grid home-insights panel">
-          <div className="mini-stat">
-            <span className="metric">15</span>
-            <span className="label">Search Appearance</span>
-            <small>Last 30 days</small>
-          </div>
-          <div className="mini-stat">
-            <span className="metric">3</span>
-            <span className="label">Recruiters Activity</span>
-            <small>Last 30 days</small>
-          </div>
-        </section>}
+        {activeNav === 'Home' && role === 'candidate' && <div className="candidate-home-content">
+            <section className="insights-grid home-insights panel">
+              <div className="mini-stat">
+                <span className="metric">15</span>
+                <span className="label">Search Appearance</span>
+                <small>Last 30 days</small>
+              </div>
+              <div className="mini-stat">
+                <span className="metric">3</span>
+                <span className="label">Recruiters Activity</span>
+                <small>Last 30 days</small>
+              </div>
+            </section>
 
-        {activeNav === 'Home' && role === 'candidate' && <section className="jobs-section panel">
-          <div className="jobs-header"><div><h3>Recommended for you</h3><p className="jobs-section-intro">All verified listings that match your profile, skills, and preferred location.</p></div><button type="button" className="link-button" onClick={() => setActiveNav('Apply')}>View all</button></div>
-          {isLoadingJobs && <p className="library-status">Loading matched job listings...</p>}
-          {!isLoadingJobs && homeJobs.length === 0 && <p className="library-status">No verified job listings are currently available. View all for official employer career portals.</p>}
-          <div className="job-list-grid">{homeJobs.map((job) => <JobListingCard key={job.id} job={job} onApply={applyToJob} email={email} compact />)}</div>
-          {hasMoreRecommendations && <button type="button" className="link-button" onClick={loadMoreRecommendations} disabled={isLoadingMoreRecommendations}>{isLoadingMoreRecommendations ? 'Loading more jobs...' : 'Load more jobs'}</button>}
-        </section>}
+            <section className="jobs-section panel">
+              <div className="jobs-header"><div><h3>Recommended for you</h3><p className="jobs-section-intro">All verified listings that match your profile, skills, and preferred location.</p></div><button type="button" className="link-button" onClick={() => setActiveNav('Apply')}>View all</button></div>
+              {isLoadingJobs && <p className="library-status">Loading matched job listings...</p>}
+              {!isLoadingJobs && homeJobs.length === 0 && <p className="library-status">No verified job listings are currently available. View all for official employer career portals.</p>}
+              <div className="job-list-grid">{homeJobs.map((job) => <JobListingCard key={job.id} job={job} onApply={applyToJob} email={email} compact />)}</div>
+              {hasMoreRecommendations && <button type="button" className="link-button" onClick={loadMoreRecommendations} disabled={isLoadingMoreRecommendations}>{isLoadingMoreRecommendations ? 'Loading more jobs...' : 'Load more jobs'}</button>}
+            </section>
+        </div>}
 
         {activeNav === 'Apply' && role === 'candidate' && <section className="jobs-section panel">
           <div className="jobs-header">
@@ -1641,6 +1867,12 @@ function LandingDashboard({ profile, email, role, initialNav, onEditProfileSecti
         {activeNav === 'Notifications' && <NotificationsView email={email} onOpenApplications={() => setActiveNav('Applications Received')} onOpenMessages={() => setActiveNav('Messages')} />}
 
         {activeNav === 'CN Apply' && role === 'candidate' && <CandidateJobApplicationView email={email} profile={profile} onBack={() => { const openingId = new URLSearchParams(window.location.search).get('cn-apply'); if (openingId) localStorage.removeItem(`cn-application:${openingId}`); window.history.replaceState(null, '', window.location.pathname); setActiveNav('Apply'); }} />}
+        </div>
+        <HomeLearningPanel
+          profile={profile}
+          onOpenLibrary={() => setActiveNav('Library')}
+          onOpenCourses={() => setActiveNav('Courses')}
+        />
       </main>
 
     </div>

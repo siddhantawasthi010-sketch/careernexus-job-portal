@@ -1,7 +1,88 @@
 import { BadRequestException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { EmailService } from '../email/email.service';
-import { DatabaseService, UserRole } from '../database/database.service';
+import { CourseRecord, DatabaseService, LibraryTopicRecord, UserRole } from '../database/database.service';
+import { getRelatedLearningSkills, jobLearningCatalog } from '../jobs/job-learning-catalog';
+
+const normalizeSkill = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+const profileSkills = (profile: Record<string, unknown>) => {
+  const skills = Array.isArray(profile.skills)
+    ? profile.skills
+    : typeof profile.skills === 'string' ? profile.skills.split(',') : [];
+  const employmentSkills = Array.isArray(profile.employmentDetails)
+    ? profile.employmentDetails.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || !('skills' in entry)) return [];
+      const value = entry.skills;
+      return Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+    })
+    : [];
+
+  return [...skills, ...employmentSkills]
+    .filter((skill): skill is string => typeof skill === 'string' && Boolean(skill.trim()))
+    .map((skill) => skill.trim())
+    .filter((skill, index, allSkills) => allSkills.findIndex((item) => normalizeSkill(item) === normalizeSkill(skill)) === index);
+};
+
+const topicForSkill = (skill: string): Omit<LibraryTopicRecord, 'id'> => {
+  const normalizedSkill = normalizeSkill(skill);
+  const catalogEntry = jobLearningCatalog.find((entry) => (
+    normalizeSkill(entry.name) === normalizedSkill
+    || entry.matchers.some((matcher) => normalizeSkill(matcher) === normalizedSkill)
+  ));
+
+  if (catalogEntry) {
+    return {
+      name: catalogEntry.name,
+      briefDescription: catalogEntry.briefDescription,
+      explanation: `${catalogEntry.explanation}\n\nA complete learning path should connect the concepts below to one working deliverable. Begin with the smallest useful requirement, build a working version, validate normal and failure cases, then document how it is run and maintained.`,
+      subtopics: catalogEntry.subtopics || [
+        `${catalogEntry.name} fundamentals, terminology, and core purpose`,
+        `Architecture, components, and how ${catalogEntry.name} fits into an application`,
+        'Inputs, outputs, data formats, and integration boundaries',
+        'Common errors, validation, security, and recovery',
+        'Testing, performance, observability, and maintainability',
+        'Deployment, versioning, and operational support',
+      ],
+      realWorldFlow: catalogEntry.realWorldFlow || `Real-world example: a product team needs to deliver a user-facing feature that depends on ${catalogEntry.name}. First clarify the user outcome and acceptance criteria. Design the smallest component or service boundary that uses ${catalogEntry.name}; implement it with validated inputs and explicit error handling; connect it to the real data/API boundary; test success, invalid input, and dependency failure; deploy to a staging environment; and monitor logs, latency, and user-visible results before release.`,
+      example: catalogEntry.example,
+    };
+  }
+
+  return {
+    name: skill,
+    briefDescription: `${skill} is a professional skill. This guide provides a structured path from its core concepts to a tested, end-to-end implementation.`,
+    explanation: `${skill} was listed in your profile but is not yet in the curated topic catalog. Start by identifying the specific tools, version, and expected outcome used in your role; the same skill name can refer to different implementations. Learn the core terminology and supported interfaces from the official documentation, then build the small workflow below and replace its integration points with the actual ${skill} APIs and conventions. Verify behavior with realistic data and document limitations rather than treating this starter guide as vendor-specific reference documentation.`,
+    subtopics: [
+      `${skill} fundamentals, terminology, supported versions, and setup`,
+      'Core components, configuration, and the data or control flow',
+      'Inputs, outputs, interfaces, and integration with the surrounding system',
+      'Validation, permissions, security, errors, and recovery',
+      'Unit, integration, and end-to-end testing with realistic data',
+      'Deployment, monitoring, performance, and maintenance',
+    ],
+    realWorldFlow: `Real-world example: a team must deliver a small production feature using ${skill}. Agree on the user outcome and acceptance criteria; confirm the runtime, version, and trusted documentation; prepare an isolated development environment; implement the smallest end-to-end path from validated input through ${skill} to a visible or persisted result; handle expected failures; test normal, boundary, and dependency-error cases; deploy to staging; and review logs and results with a stakeholder before release.`,
+    example: `// End-to-end implementation checklist for ${skill}\n// 1. Validate the real input and reject invalid data.\n// 2. Configure and call the documented ${skill} interface.\n// 3. Handle success, timeout, and service errors.\n// 4. Persist or display the result only after validation.\n// 5. Add tests for success, invalid input, and dependency failure.\n// Replace this checklist with executable code from the official ${skill} SDK/runtime.`,
+  };
+};
+
+const courseSearchesForSkill = (skill: string): Omit<CourseRecord, 'id'>[] => [
+  {
+    title: `${skill} courses on Coursera`,
+    topic: skill,
+    provider: 'Coursera',
+    level: 'All levels',
+    duration: 'Self-paced',
+    url: `https://www.coursera.org/search?query=${encodeURIComponent(skill)}`,
+  },
+  {
+    title: `${skill} courses on Udemy`,
+    topic: skill,
+    provider: 'Udemy',
+    level: 'All levels',
+    duration: 'Self-paced',
+    url: `https://www.udemy.com/courses/search/?q=${encodeURIComponent(skill)}`,
+  },
+];
 
 @Injectable()
 export class AuthService {
@@ -90,15 +171,64 @@ export class AuthService {
       throw new UnauthorizedException('Invalid OTP. Please enter the correct code.');
     }
 
-    await this.databaseService.deleteOtps(normalizedEmail);
     const existingUser = await this.databaseService.getUserByEmail(normalizedEmail);
     const user = await this.buildUserForEmail(normalizedEmail, otpEntry.role);
+    await this.syncUserLearningContent(user.profile || {});
+    await this.databaseService.deleteOtps(normalizedEmail);
 
     return {
       accessToken: this.createAccessToken(normalizedEmail),
       isNewUser: !existingUser,
       user,
     };
+  }
+
+  private async syncUserLearningContent(profile: Record<string, unknown>) {
+    const skills = profileSkills(profile);
+    const professionTerms = [
+      profile.preferredJobRole,
+      profile.currentJobTitle,
+      profile.currentRole,
+      profile.currentlyWorkingAs,
+      profile.headline,
+    ].filter((term): term is string => typeof term === 'string' && Boolean(term.trim()));
+    const [existingTopics, existingCourses] = await Promise.all([
+      this.databaseService.getLibraryTopics(),
+      this.databaseService.getCourses(),
+    ]);
+    const topicsToAdd = new Map<string, Omit<LibraryTopicRecord, 'id'>>();
+    const coursesToAdd: Omit<CourseRecord, 'id'>[] = [];
+    const topicsByName = new Map(existingTopics.map((topic) => [normalizeSkill(topic.name), topic]));
+    const knownCourseTopics = new Set(existingCourses.map((course) => normalizeSkill(course.topic)));
+
+    const userTopics = new Map<string, Omit<LibraryTopicRecord, 'id'>>();
+    const relatedSkills = getRelatedLearningSkills([...skills, ...professionTerms]);
+    for (const skill of [...skills, ...relatedSkills.map((entry) => entry.name)]) {
+      const topic = topicForSkill(skill);
+      userTopics.set(normalizeSkill(topic.name), topic);
+    }
+
+    for (const [topicKey, topic] of userTopics) {
+      const existingTopic = topicsByName.get(topicKey);
+      if (
+        !existingTopic
+        || !existingTopic.subtopics?.length
+        || !existingTopic.realWorldFlow?.trim()
+      ) {
+        topicsToAdd.set(topicKey, topic);
+      }
+    }
+
+    for (const skill of skills) {
+      const topic = topicForSkill(skill);
+      const topicKey = normalizeSkill(topic.name);
+      if (!knownCourseTopics.has(topicKey)) {
+        coursesToAdd.push(...courseSearchesForSkill(topic.name));
+        knownCourseTopics.add(topicKey);
+      }
+    }
+
+    await this.databaseService.addMissingUserLearningContent([...topicsToAdd.values()], coursesToAdd);
   }
 
   createAccessToken(email: string) {
@@ -151,6 +281,7 @@ export class AuthService {
     }
 
     const user = await this.databaseService.updateUserProfile(normalizedEmail, profile);
+    await this.syncUserLearningContent(user.profile || {});
     return { user };
   }
 

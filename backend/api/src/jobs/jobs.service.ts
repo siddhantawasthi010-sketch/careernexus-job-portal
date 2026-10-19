@@ -40,6 +40,12 @@ interface CachedProviderJobs {
   pending?: Promise<PortalJob[]>;
 }
 
+interface CachedRecommendationJobPool {
+  expiresAt: number;
+  jobs: PortalJob[];
+  pending?: Promise<PortalJob[]>;
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 const asString = (value: unknown) => typeof value === 'string' ? value : '';
@@ -178,6 +184,7 @@ export class JobsService implements OnModuleInit {
   private readonly providerJobCache = new Map<string, CachedProviderJobs>();
   private readonly providerRetryAfter = new Map<string, number>();
   private readonly logger = new Logger(JobsService.name);
+  private recommendationJobPool: CachedRecommendationJobPool | null = null;
   private feedRefreshRunning = false;
   private lastFeedRefreshAt: string | null = null;
   private lastFeedRefreshFailures: { source: string; message: string }[] = [];
@@ -222,10 +229,7 @@ export class JobsService implements OnModuleInit {
     }
 
     const providers = this.getProviders(search.keywords, search.locations);
-    const availableJobs = [
-      ...await this.databaseService.getRecentFeedJobs(),
-      ...await this.databaseService.getRecruiterJobListings() as PortalJob[],
-    ];
+    const availableJobs = await this.getRecommendationJobPool();
     const allMatches = availableJobs
       .map((job) => ({ ...job, matchScore: this.scoreJob(job, user.profile) }))
       .filter((job) => job.matchScore > 0)
@@ -257,6 +261,37 @@ export class JobsService implements OnModuleInit {
       nextOffset: offset + jobs.length,
       diagnostic,
     };
+  }
+
+  private async getRecommendationJobPool(): Promise<PortalJob[]> {
+    const cached = this.recommendationJobPool;
+    if (cached && cached.expiresAt > Date.now()) return cached.jobs;
+    if (cached?.pending) return cached.jobs.length ? cached.jobs : cached.pending;
+
+    const pending = Promise.all([
+      this.databaseService.getRecentFeedJobs(10_000),
+      this.databaseService.getRecruiterJobListings(),
+    ]).then(([feedJobs, recruiterJobs]) => {
+      const jobs = [...feedJobs, ...recruiterJobs as PortalJob[]];
+      this.recommendationJobPool = { jobs, expiresAt: Date.now() + 60_000 };
+      return jobs;
+    }).catch((error) => {
+      this.recommendationJobPool = cached?.jobs.length ? cached : null;
+      throw error;
+    });
+
+    this.recommendationJobPool = {
+      jobs: cached?.jobs || [],
+      expiresAt: cached?.expiresAt || 0,
+      pending,
+    };
+    if (cached?.jobs.length) {
+      void pending.catch((error) => {
+        this.logger.warn(`Unable to refresh the cached recommendation pool: ${error instanceof Error ? error.message : 'unknown error'}`);
+      });
+      return cached.jobs;
+    }
+    return pending;
   }
 
   private async refreshJobFeeds() {
@@ -302,6 +337,7 @@ export class JobsService implements OnModuleInit {
         if (sourceOutcomes.some((outcome) => outcome.error)) continue;
         await this.databaseService.deleteStaleFeedJobs(source, refreshStartedAt);
       }
+      this.recommendationJobPool = null;
       try {
         await this.syncLearningContentFromJobs();
       } catch (error) {
@@ -328,6 +364,15 @@ export class JobsService implements OnModuleInit {
       name: skill.name,
       briefDescription: skill.briefDescription,
       explanation: skill.explanation,
+      subtopics: skill.subtopics || [
+        `${skill.name} fundamentals, terminology, and core purpose`,
+        `Architecture, components, and how ${skill.name} fits into an application`,
+        'Inputs, outputs, data formats, and integration boundaries',
+        'Common errors, validation, security, and recovery',
+        'Testing, performance, observability, and maintainability',
+        'Deployment, versioning, and operational support',
+      ],
+      realWorldFlow: skill.realWorldFlow || `Production workflow: clarify the user outcome and acceptance criteria for ${skill.name}; design a small component boundary; implement the normal path with validation and error handling; integrate with real data or a service; test success, invalid input, and dependency failure; deploy to staging; and observe logs and user-visible results before release.`,
       example: skill.example,
     }));
     const courseSearchProviders = [

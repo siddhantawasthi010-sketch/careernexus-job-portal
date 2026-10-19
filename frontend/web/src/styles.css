@@ -173,24 +173,38 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
 .landing-page h4 { color: #172b3a; }
 
 .topbar {
-  max-width: 1100px;
-  margin: 0 auto 18px;
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: -18px 0 18px;
+  padding: 18px 0;
+  background: #e9eef1;
 }
 
+.profile-page .topbar { background: #e3e9ed; }
+
 .landing-topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(168px, 1fr) minmax(0, 1280px) minmax(168px, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
 }
 
+.logo-home-button { justify-self: start; display: block; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.logo-home-button:hover { background: transparent; }
+.logo-home-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; border-radius: 4px; }
 .dashboard-logo { display: block; width: 92px; height: 52px; flex: 0 0 92px; object-fit: contain; object-position: left center; }
+
+.topbar-center { display: flex; align-items: center; justify-self: center; justify-content: center; gap: 16px; width: min(100%, 1280px); min-width: 0; }
 
 .top-nav {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
+  flex: 0 0 auto;
+  justify-content: center;
 }
 
 .top-nav-item {
@@ -225,9 +239,16 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
 .header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-self: end;
+  gap: 8px;
   font-weight: 700;
 }
+
+.header-icon-button { position: relative; display: inline-grid; place-items: center; width: 36px; height: 36px; flex: 0 0 36px; padding: 0; border: 1px solid #cbd6dd; border-radius: 50%; background: #fff; color: #526779; }
+.header-icon-button:hover, .header-icon-button.active { border-color: #2563eb; background: #eaf2ff; color: #2563eb; }
+.header-icon-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.header-icon-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border: 2px solid #e9eef1; border-radius: 999px; background: #dc2626; color: #fff; font-size: 0.62rem; font-weight: 800; line-height: 1; }
+.profile-page .header-icon-badge { border-color: #e3e9ed; }
 
 .profile-icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: 0 0 36px; overflow: hidden; padding: 0; border: 1px solid #cbd6dd; border-radius: 50%; background: #fff; color: #526779; }
 .profile-icon-button:hover, .profile-icon-button.active { border-color: #2563eb; background: #eaf2ff; color: #2563eb; }
@@ -251,12 +272,95 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
   gap: 20px;
 }
 
+.workspace-main-content { display: grid; align-content: start; gap: 20px; min-width: 0; }
+
 .panel {
   background: #fff;
   border: 1px solid #d7e0e6;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
   padding: 18px;
+}
+
+.candidate-home-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.candidate-home-content { display: grid; gap: 20px; min-width: 0; }
+.home-learning-rail { display: grid; align-content: start; gap: 16px; min-width: 0; }
+.home-learning-section { display: grid; align-content: start; gap: 12px; min-width: 0; padding: 16px; }
+.home-learning-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.home-learning-heading .eyebrow { margin: 0 0 3px; font-size: 0.66rem; }
+.home-learning-heading h3 { margin: 0; font-size: 0.95rem; }
+.home-learning-heading .link-button { flex: 0 0 auto; padding-top: 2px; color: #1d4ed8; font-size: 0.76rem; }
+.home-learning-status { margin: 0; color: #64748b; font-size: 0.8rem; }
+.home-learning-item { display: grid; justify-items: start; gap: 4px; min-width: 0; padding: 9px 0 0; border-top: 1px solid #e4eaee; background: transparent; color: #172b3a; text-align: left; }
+.home-learning-item strong { width: 100%; overflow-wrap: anywhere; font-size: 0.8rem; }
+.home-learning-item span { display: -webkit-box; overflow: hidden; color: #64748b; font-size: 0.72rem; line-height: 1.4; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.home-learning-item a { color: #1d4ed8; font-size: 0.74rem; font-weight: 700; text-decoration: none; }
+.home-learning-item a:hover { text-decoration: underline; }
+.user-profile-sidebar { display: grid; justify-items: center; gap: 12px; min-width: 0; text-align: center; }
+.user-profile-avatar { display: grid; place-items: center; width: 84px; height: 84px; overflow: hidden; border: 3px solid #e3ebf2; border-radius: 50%; background: #edf4fa; color: #245c8a; font-size: 1.6rem; font-weight: 800; }
+.user-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.user-profile-sidebar h2 { max-width: 100%; margin: 0; overflow-wrap: anywhere; font-size: 1.1rem; }
+.user-profile-headline { min-height: 1.3em; margin: -8px 0 0; color: #5b6d7b; font-size: 0.84rem; overflow-wrap: anywhere; }
+.user-profile-details { display: grid; width: 100%; gap: 12px; margin: 0; padding: 14px 0; border-top: 1px solid #e4eaee; border-bottom: 1px solid #e4eaee; text-align: left; }
+.user-profile-details div { display: grid; gap: 2px; min-width: 0; }
+.user-profile-details dt { color: #64748b; font-size: 0.76rem; font-weight: 700; }
+.user-profile-details dd { margin: 0; overflow-wrap: anywhere; color: #263b4a; font-size: 0.84rem; }
+.user-profile-completion { display: grid; width: 100%; gap: 8px; text-align: left; }
+.user-profile-completion > div:first-child { display: flex; justify-content: space-between; gap: 8px; color: #526779; font-size: 0.8rem; }
+.user-profile-completion strong { color: #245c8a; }
+.user-profile-progress { height: 7px; overflow: hidden; border-radius: 99px; background: #e5edf4; }
+.user-profile-progress span { display: block; height: 100%; border-radius: inherit; background: #2563eb; }
+.user-profile-skills { width: 100%; text-align: left; }
+.user-profile-skills h3 { margin: 0 0 8px; font-size: 0.88rem; }
+.user-profile-skills > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.user-profile-skills .profile-tile { padding: 5px 8px; font-size: 0.72rem; }
+.user-profile-action { width: 100%; min-height: 38px; padding: 8px 12px; border: 1px solid #2563eb; border-radius: 7px; background: #fff; color: #1d4ed8; font-size: 0.84rem; }
+.user-profile-action:hover { background: #eff6ff; }
+
+@media (min-width: 1200px) {
+  .dashboard-shell.workspace-dashboard {
+    width: calc(100vw - 600px);
+    max-width: none;
+    margin-right: 0;
+    margin-left: 284px;
+  }
+
+  .workspace-main-content { grid-column: 1 / -1; width: 100%; }
+
+  .user-profile-sidebar {
+    position: fixed;
+    z-index: 1;
+    top: 106px;
+    left: 16px;
+    width: 260px;
+  }
+
+  .home-learning-rail {
+    position: fixed;
+    z-index: 1;
+    top: 106px;
+    right: 16px;
+    width: 260px;
+    max-height: calc(100vh - 122px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 1199px) {
+  .dashboard-shell.workspace-dashboard {
+    width: 100%;
+    max-width: 1100px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .user-profile-sidebar { order: 1; }
+  .workspace-main-content { order: 2; }
+  .home-learning-rail { order: 3; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .profile-section {
@@ -424,7 +528,7 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
 .jobs-search-box:focus-within { border-color: #4c85af; box-shadow: 0 0 0 2px rgba(36, 92, 138, 0.12); }
 .jobs-search-box input { width: 100%; min-width: 0; height: 40px; padding: 0; border: 0; outline: 0; background: transparent; color: #172b3a; box-shadow: none; }
 .jobs-search-box input:focus { border: 0; outline: 0; box-shadow: none; }
-.dashboard-jobs-search { margin: 0 0 18px; }
+.dashboard-jobs-search { flex: 1 1 320px; width: auto; min-width: 220px; max-width: none; margin: 0; }
 
 .job-list-grid {
   display: grid;
@@ -643,6 +747,17 @@ h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 700; color: #172b3a; }
 .topic-field p {
   margin-bottom: 16px;
   color: #334155;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+.topic-subtopics {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 18px;
+  padding-left: 22px;
+  color: #334155;
+  line-height: 1.55;
 }
 
 .topic-example pre {
@@ -1100,6 +1215,9 @@ button.profile-tile { border: 1px solid rgba(37, 99, 235, 0.2); }
 .connect-error { margin: 8px 0 0; color: #b91c1c; font-size: 0.84rem; }
 
 @media (max-width: 640px) {
+  .home-learning-rail { grid-template-columns: 1fr; }
+  .user-profile-sidebar { justify-items: center; }
+
   .form-grid,
   .detail-grid,
   .insights-grid {
@@ -1128,17 +1246,19 @@ button.profile-tile { border: 1px solid rgba(37, 99, 235, 0.2); }
   .landing-topbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: 'brand account' 'navigation navigation';
+    grid-template-areas: 'brand account' 'controls controls';
     align-items: center;
     gap: 10px 12px;
   }
 
-  .dashboard-logo { grid-area: brand; width: 81px; height: 46px; }
+  .landing-topbar .logo-home-button { grid-area: brand; }
+  .dashboard-logo { width: 81px; height: 46px; }
 
-  .landing-topbar .top-nav { grid-area: navigation; }
+  .landing-topbar .topbar-center { grid-area: controls; display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 10px; width: 100%; }
+  .landing-topbar .top-nav { width: 100%; }
+  .landing-topbar .dashboard-jobs-search { width: 100%; max-width: none; }
 
   .top-nav {
-    width: 100%;
     justify-content: space-between;
     flex-wrap: wrap;
   }
@@ -1146,4 +1266,11 @@ button.profile-tile { border: 1px solid rgba(37, 99, 235, 0.2); }
   .landing-topbar .header-right { grid-area: account; align-self: start; }
   .connect-person { align-items: flex-start; flex-wrap: wrap; }
   .connect-actions { width: 100%; }
+}
+
+@media (min-width: 641px) and (max-width: 1100px) {
+  .landing-topbar { grid-template-columns: minmax(92px, 1fr) auto; }
+  .landing-topbar .topbar-center { grid-column: 1 / -1; flex-wrap: wrap; }
+  .landing-topbar .top-nav { flex: 1 1 100%; justify-content: center; }
+  .landing-topbar .dashboard-jobs-search { flex: 0 1 640px; }
 }

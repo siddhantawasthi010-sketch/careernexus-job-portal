@@ -100,6 +100,8 @@ export interface LibraryTopicRecord {
   name: string;
   briefDescription: string;
   explanation: string;
+  subtopics: string[];
+  realWorldFlow: string;
   example: string;
 }
 
@@ -112,6 +114,37 @@ export interface CourseRecord {
   duration: string;
   url: string;
 }
+
+interface LibraryTopicRow {
+  id: number;
+  name: string;
+  brief_description: string;
+  explanation: string;
+  subtopics?: unknown;
+  real_world_flow?: string | null;
+  example: string;
+}
+
+const topicDetailColumns = ['subtopics', 'real_world_flow'];
+const isMissingTopicDetailColumns = (error: { code?: string; message?: string }) => (
+  (error.code === '42703' || error.code === 'PGRST204')
+  && topicDetailColumns.some((column) => error.message?.includes(column))
+);
+const legacyTopicDetailMarker = '\n\nKey subtopics:\n';
+const serializeLegacyTopicExplanation = (topic: Omit<LibraryTopicRecord, 'id'>) => (
+  `${topic.explanation}${legacyTopicDetailMarker}${topic.subtopics.map((subtopic) => `- ${subtopic}`).join('\n')}\n\nEnd-to-end real-world flow:\n${topic.realWorldFlow}`
+);
+const parseLegacyTopicExplanation = (explanation: string) => {
+  const [details, subtopicAndFlow] = explanation.split(legacyTopicDetailMarker);
+  if (!subtopicAndFlow) return { explanation, subtopics: [], realWorldFlow: '' };
+
+  const flowMarker = '\n\nEnd-to-end real-world flow:\n';
+  const [subtopicsText, realWorldFlow = ''] = subtopicAndFlow.split(flowMarker);
+  const subtopics = subtopicsText.split('\n')
+    .map((line) => line.replace(/^- /, '').trim())
+    .filter(Boolean);
+  return { explanation: details, subtopics, realWorldFlow };
+};
 
 const toSqlDate = (value?: string) => {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -1065,40 +1098,49 @@ export class DatabaseService {
     if (error) throw new Error(`Unable to remove stale ${source} jobs: ${error.message}`);
   }
 
-  async getRecentFeedJobs(): Promise<FeedJobRecord[]> {
+  async getRecentFeedJobs(limit = 500): Promise<FeedJobRecord[]> {
     const fetchedAfter = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(10_000, Math.floor(limit))) : 500;
     const pageSize = 1000;
-    const jobs: FeedJobRecord[] = [];
-    for (let offset = 0; ; offset += pageSize) {
+    const { count, error: countError } = await this.client
+      .from('job_feed_items')
+      .select('id', { count: 'exact', head: true })
+      .gte('fetched_at', fetchedAfter);
+    if (countError) throw new Error(`Unable to count cached jobs: ${countError.message}`);
+
+    const totalRows = Math.min(count || 0, safeLimit);
+    const pageCount = Math.ceil(totalRows / pageSize);
+    const pages = await Promise.all(Array.from({ length: pageCount }, async (_, pageIndex) => {
+      const from = pageIndex * pageSize;
+      const to = Math.min(from + pageSize, totalRows) - 1;
       const { data, error } = await this.client
         .from('job_feed_items')
         .select('id, source, source_id, title, company, location, type, job_type, employment_type, preferred_shift, description, salary, url, posted_at')
         .gte('fetched_at', fetchedAfter)
         .order('fetched_at', { ascending: false })
         .order('id', { ascending: true })
-        .range(offset, offset + pageSize - 1);
+        .range(from, to);
       if (error) throw new Error(`Unable to load cached jobs: ${error.message}`);
-      const page = data || [];
-      jobs.push(...page.map((job) => ({
-        id: job.id,
-        source: job.source,
-        sourceId: job.source_id,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        type: job.type,
-        jobType: job.job_type,
-        employmentType: job.employment_type,
-        preferredShift: job.preferred_shift,
-        description: job.description,
-        salary: job.salary,
-        url: job.url,
-        postedAt: job.posted_at,
-        matchScore: 0,
-      })));
-      if (page.length < pageSize) break;
-    }
-    return jobs;
+      return data || [];
+    }));
+
+    return pages.flat().map((job) => ({
+      id: job.id,
+      source: job.source,
+      sourceId: job.source_id,
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      type: job.type,
+      jobType: job.job_type,
+      employmentType: job.employment_type,
+      preferredShift: job.preferred_shift,
+      description: job.description,
+      salary: job.salary,
+      url: job.url,
+      postedAt: job.posted_at,
+      matchScore: 0,
+    }));
   }
 
   async getUserJobApplications(email: string): Promise<Record<string, unknown>[]> {
@@ -1150,11 +1192,26 @@ export class DatabaseService {
   }
 
   async getLibraryTopics(): Promise<LibraryTopicRecord[]> {
-    const { data, error } = await this.client
+    let data: LibraryTopicRow[] | null;
+    let error: { code?: string; message: string } | null;
+    const primaryResult = await this.client
       .from('library_topics')
-      .select('id, name, brief_description, explanation, example')
+      .select('id, name, brief_description, explanation, subtopics, real_world_flow, example')
       .eq('is_active', true)
       .order('name', { ascending: true });
+    data = primaryResult.data;
+    error = primaryResult.error;
+
+    const hasTopicDetailColumns = !error;
+    if (error && isMissingTopicDetailColumns(error)) {
+      const legacyResult = await this.client
+        .from('library_topics')
+        .select('id, name, brief_description, explanation, example')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+      data = legacyResult.data;
+      error = legacyResult.error;
+    }
 
     if (error) {
       throw new Error(`Unable to load library topics: ${error.message}`);
@@ -1164,7 +1221,13 @@ export class DatabaseService {
       id: topic.id,
       name: topic.name,
       briefDescription: topic.brief_description,
-      explanation: topic.explanation,
+      ...hasTopicDetailColumns
+        ? {
+          explanation: topic.explanation,
+          subtopics: Array.isArray(topic.subtopics) ? topic.subtopics : [],
+          realWorldFlow: topic.real_world_flow || '',
+        }
+        : parseLegacyTopicExplanation(topic.explanation),
       example: topic.example,
     })) as LibraryTopicRecord[];
   }
@@ -1190,11 +1253,12 @@ export class DatabaseService {
         name: topic.name,
         brief_description: topic.briefDescription,
         explanation: topic.explanation,
+        subtopics: topic.subtopics,
+        real_world_flow: topic.realWorldFlow,
         example: topic.example,
         is_active: true,
       }));
-      const { error } = await this.client.from('library_topics').upsert(topicRows, { onConflict: 'name', ignoreDuplicates: true });
-      if (error) throw new Error(`Unable to add job-skill library topics: ${error.message}`);
+      await this.upsertLibraryTopicRows(topicRows, true);
     }
 
     if (courses.length) {
@@ -1210,5 +1274,77 @@ export class DatabaseService {
       const { error } = await this.client.from('courses').upsert(courseRows, { onConflict: 'title', ignoreDuplicates: true });
       if (error) throw new Error(`Unable to add job-skill courses: ${error.message}`);
     }
+  }
+
+  async addMissingUserLearningContent(topics: Omit<LibraryTopicRecord, 'id'>[], courses: Omit<CourseRecord, 'id'>[]): Promise<void> {
+    if (topics.length) {
+      const topicRows = topics.map((topic) => ({
+        name: topic.name,
+        brief_description: topic.briefDescription,
+        explanation: topic.explanation,
+        subtopics: topic.subtopics,
+        real_world_flow: topic.realWorldFlow,
+        example: topic.example,
+        is_active: true,
+      }));
+      await this.upsertLibraryTopicRows(topicRows, false);
+    }
+
+    if (courses.length) {
+      const courseRows = courses.map((course) => ({
+        title: course.title,
+        topic: course.topic,
+        provider: course.provider,
+        level: course.level,
+        duration: course.duration,
+        url: course.url,
+        is_active: true,
+      }));
+      const { error } = await this.client.from('courses').upsert(courseRows, { onConflict: 'title' });
+      if (error) throw new Error(`Unable to add user-skill courses: ${error.message}`);
+    }
+  }
+
+  private async upsertLibraryTopicRows(
+    topicRows: {
+      name: string;
+      brief_description: string;
+      explanation: string;
+      subtopics: string[];
+      real_world_flow: string;
+      example: string;
+      is_active: boolean;
+    }[],
+    ignoreDuplicates: boolean,
+  ) {
+    const { error } = await this.client.from('library_topics').upsert(topicRows, {
+      onConflict: 'name',
+      ignoreDuplicates,
+    });
+
+    if (!error) return;
+    if (!isMissingTopicDetailColumns(error)) {
+      throw new Error(`Unable to save Library topics: ${error.message}`);
+    }
+
+    const legacyRows = topicRows.map((topic) => ({
+      name: topic.name,
+      brief_description: topic.brief_description,
+      explanation: serializeLegacyTopicExplanation({
+        name: topic.name,
+        briefDescription: topic.brief_description,
+        explanation: topic.explanation,
+        subtopics: topic.subtopics,
+        realWorldFlow: topic.real_world_flow,
+        example: topic.example,
+      }),
+      example: topic.example,
+      is_active: topic.is_active,
+    }));
+    const { error: legacyError } = await this.client.from('library_topics').upsert(legacyRows, {
+      onConflict: 'name',
+      ignoreDuplicates,
+    });
+    if (legacyError) throw new Error(`Unable to save Library topics: ${legacyError.message}`);
   }
 }
